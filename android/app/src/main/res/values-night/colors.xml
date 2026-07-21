@@ -1,0 +1,5 @@
+<resources>
+  <!-- Keep splash yellow in dark mode — empty night colors let defaults go black -->
+  <color name="splashscreen_background">#FFE600</color>
+  <color name="activityBackground">#FFE600</color>
+</resources>

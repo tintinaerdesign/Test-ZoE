@@ -1,0 +1,74 @@
+{
+  "expo": {
+    "name": "ZOE",
+    "slug": "zoe",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/app-icon.png",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#FFE600",
+    "splash": {
+      "image": "./assets/app-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#FFE600"
+    },
+    "android": {
+      "package": "com.tintinartdesign.zoe",
+      "versionCode": 1,
+      "softwareKeyboardLayoutMode": "resize",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/app-icon.png",
+        "backgroundColor": "#FFE600"
+      },
+      "splash": {
+        "image": "./assets/app-icon.png",
+        "resizeMode": "contain",
+        "backgroundColor": "#FFE600"
+      }
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.tintinartdesign.zoe",
+      "splash": {
+        "image": "./assets/app-icon.png",
+        "resizeMode": "contain",
+        "backgroundColor": "#FFE600"
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "backgroundColor": "#FFE600",
+      "splash": {
+        "image": "./assets/app-icon.png",
+        "resizeMode": "contain",
+        "backgroundColor": "#FFE600"
+      }
+    },
+    "plugins": [
+      "expo-font",
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Allow ZOE to use the camera to take payment evidence photos."
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/app-icon.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#FFE600",
+          "android": {
+            "image": "./assets/app-icon.png",
+            "resizeMode": "contain",
+            "backgroundColor": "#FFE600"
+          },
+          "dark": {
+            "image": "./assets/app-icon.png",
+            "backgroundColor": "#FFE600"
+          }
+        }
+      ]
+    ]
+  }
+}

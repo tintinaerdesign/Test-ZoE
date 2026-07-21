@@ -1,0 +1,28 @@
+node_modules/
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+*.orig.*
+.metro-health-check*
+npm-debug.*
+.DS_Store
+.idea/
+*.tsbuildinfo
+
+# Native build outputs (keep android/ios sources)
+android/app/build/
+android/build/
+android/.gradle/
+android/local.properties
+ios/build/
+ios/Pods/
+
+# Local / debug junk
+assets/_emu-err.txt
+assets/_emu-out.txt
+*.jks
+*.keystore
+!debug.keystore
+.env
+.env.*
