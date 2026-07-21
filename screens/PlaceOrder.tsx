@@ -2,16 +2,15 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
-  InteractionManager,
   Pressable,
   StyleSheet,
+  Text,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PinModal } from '../components/PinModal';
 import { StaffNav } from '../components/StaffNav';
-import { Text } from '../components/UiText';
 import { type CashPayStatus, type KitchenTicket } from '../data/kitchen';
 import { EGG_ADDON, findMenuItem } from '../data/menu';
 import { colors } from '../utils/colors';
@@ -148,9 +147,7 @@ export function PlaceOrder({
   useEffect(() => {
     if (readySent.current || !onReady) return;
     readySent.current = true;
-    InteractionManager.runAfterInteractions(() => {
-      onReady();
-    });
+    onReady();
   }, [onReady]);
 
   /** Own unpaid cash bills only — paid / QR cards stay on Cashier. */

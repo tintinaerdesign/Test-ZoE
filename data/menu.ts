@@ -19,6 +19,8 @@ export type MenuItem = {
   id: string;
   name: string;
   nameTh: string;
+  /** Extra search terms (EN/TH spellings). */
+  aliases?: string[];
   price: number;
   image?: ImageSourcePropType;
   options?: MenuOption[];
@@ -170,6 +172,7 @@ export const MENU: MenuItem[] = [
     id: '4',
     name: 'Northern Thai Noodles',
     nameTh: 'ข้าวซอย',
+    aliases: ['Khao soi', 'Kao Soi', 'ข้าวซอยไก่'],
     price: 150,
     station: 'main',
     image: require('../assets/khaoSoi.webp'),

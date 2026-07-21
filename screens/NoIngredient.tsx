@@ -6,11 +6,10 @@ import {
   ScrollView,
   StyleSheet,
   Switch,
+  Text,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-
-import { Text } from '../components/UiText';
 import { INGREDIENT_SUBSETS } from '../data/ingredients';
 import { MENU, type MenuItem } from '../data/menu';
 import { colors } from '../utils/colors';

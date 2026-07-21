@@ -1,11 +1,17 @@
 import { StatusBar } from 'expo-status-bar';
-import { useFonts } from 'expo-font';
+import * as Font from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
-import { useEffect, useRef, useState } from 'react';
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import {
   Alert,
   Image,
-  InteractionManager,
   StyleSheet,
   useWindowDimensions,
   View,
@@ -17,12 +23,8 @@ import {
   createKitchenTicketFromCart,
   type KitchenTicket,
 } from './data/kitchen';
-import { CashierScreen } from './screens/CashierScreen';
-import { ConfirmOrder } from './screens/ConfirmOrder';
-import { KitchenToDo } from './screens/KitchenToDo';
+/** Home screens only — keep eager so first paint is fast. */
 import { Login } from './screens/Login';
-import { MenuScreen } from './screens/MenuScreen';
-import { NoIngredient } from './screens/NoIngredient';
 import { PlaceOrder } from './screens/PlaceOrder';
 import {
   loadUnavailableIds,
@@ -30,45 +32,56 @@ import {
   saveUnavailableIds,
   saveUnavailableIngredients,
 } from './utils/availabilityStorage';
-import { lineFontSources, setLineSeedActive } from './utils/fonts';
+import { earlySessionPromise } from './utils/earlyBootstrap';
+import { lineFontSources } from './utils/fonts';
 import { loadUiCache, saveUiCache } from './utils/localCache';
+import { dismissNativeSplashCover } from './utils/nativeSplashCover';
+import { whenIdle } from './utils/schedule';
+import { saveSession } from './utils/sessionStorage';
 import {
-  ensureStaffAccount,
-  loadLoggedIn,
-  loadNickname,
-  loadPin,
-  saveSession,
-} from './utils/sessionStorage';
+  startupMark,
+  startupSummary,
+  timedAsync,
+} from './utils/startupTiming';
 import {
   loadKitchenTickets,
   saveKitchenTickets,
 } from './utils/ticketStorage';
 
+/** Lazy: not needed before splash hide — cuts ~js_module_eval cost. */
+const CashierScreen = lazy(() =>
+  import('./screens/CashierScreen').then((m) => ({ default: m.CashierScreen })),
+);
+const KitchenToDo = lazy(() =>
+  import('./screens/KitchenToDo').then((m) => ({ default: m.KitchenToDo })),
+);
+const NoIngredient = lazy(() =>
+  import('./screens/NoIngredient').then((m) => ({ default: m.NoIngredient })),
+);
+const MenuScreen = lazy(() =>
+  import('./screens/MenuScreen').then((m) => ({ default: m.MenuScreen })),
+);
+const ConfirmOrder = lazy(() =>
+  import('./screens/ConfirmOrder').then((m) => ({ default: m.ConfirmOrder })),
+);
+
 const SPLASH_BG = '#FFE600';
-/** Keep splash image on screen long enough to cover the black RN surface. */
-const SPLASH_HOLD_MS = 1800;
-
-// Instant remove — never fade onto a different surface
-SplashScreen.setOptions({ duration: 0, fade: false });
-
-/** Enable LINE Seed for the whole app once faces are loaded (EN + TH). */
-function applyLineFontForLang(_lang: 'en' | 'th') {
-  setLineSeedActive(true);
-}
+/** App chrome behind screens — must NOT be splash yellow or it flashes on navigate. */
+const APP_BG = '#0A0A0A';
+const APP_ICON = require('./assets/app-icon.png');
 
 /**
- * Brand yellow bridge + app-icon — covers black RN surface until ready.
+ * Expo best practice: call preventAutoHide in index.ts (global scope).
+ * Instant hide — no fade onto a black RN surface.
  */
-function StartupBridge({ onImageReady }: { onImageReady: () => void }) {
-  const { width } = useWindowDimensions();
-  const readySent = useRef(false);
-  const iconSize = Math.min(220, Math.round(width * 0.42));
+SplashScreen.setOptions({ duration: 0, fade: false });
 
-  function markImageReady() {
-    if (readySent.current) return;
-    readySent.current = true;
-    onImageReady();
-  }
+/**
+ * Brand yellow + app-icon overlay kept until hideAsync().
+ */
+function StartupBridge() {
+  const { width } = useWindowDimensions();
+  const iconSize = Math.min(220, Math.round(width * 0.42));
 
   return (
     <View
@@ -78,27 +91,25 @@ function StartupBridge({ onImageReady }: { onImageReady: () => void }) {
       importantForAccessibility="no-hide-descendants"
     >
       <Image
-        source={require('./assets/app-icon.png')}
+        source={APP_ICON}
         style={{ width: iconSize, height: iconSize }}
         resizeMode="contain"
-        onLoad={markImageReady}
-        onLoadEnd={markImageReady}
       />
     </View>
   );
 }
 
+type Screen =
+  | 'login'
+  | 'placeOrder'
+  | 'cashier'
+  | 'menu'
+  | 'confirm'
+  | 'kitchen'
+  | 'noIngredient';
+
 export default function App() {
-  const [fontsLoaded] = useFonts(lineFontSources);
-  const [screen, setScreen] = useState<
-    | 'login'
-    | 'placeOrder'
-    | 'cashier'
-    | 'menu'
-    | 'confirm'
-    | 'kitchen'
-    | 'noIngredient'
-  >('login');
+  const [screen, setScreen] = useState<Screen>('login');
   const [cart, setCart] = useState<Record<string, number>>({});
   const [cartNotes, setCartNotes] = useState<Record<string, string>>({});
   const [cartEggs, setCartEggs] = useState<Record<string, number>>({});
@@ -113,48 +124,105 @@ export default function App() {
   const [unavailableIds, setUnavailableIds] = useState<string[]>([]);
   const [kitchenTickets, setKitchenTickets] = useState<KitchenTicket[]>([]);
   const [kitchenPinOpen, setKitchenPinOpen] = useState(false);
-  const [storageReady, setStorageReady] = useState(false);
-  const orderSeqRef = useRef(1);
 
-  // 1) splash image first  2) then mount login/menu under it  3) then dismiss
-  const [splashImageReady, setSplashImageReady] = useState(false);
+  /** Session keys loaded — enough to choose Login vs PlaceOrder. */
   const [authChecked, setAuthChecked] = useState(false);
-  const [appReady, setAppReady] = useState(false);
+  /** First home screen mounted. */
+  const [homeReady, setHomeReady] = useState(false);
+  /** Splash (native cover + JS bridge) still covering the UI. */
   const [bridgeVisible, setBridgeVisible] = useState(true);
-  const finishingRef = useRef(false);
 
-  useEffect(() => {
-    if (!fontsLoaded) return;
-    applyLineFontForLang(lang);
-  }, [fontsLoaded, lang]);
+  const orderSeqRef = useRef(1);
+  const ticketsHydratedRef = useRef(false);
+  const uiCacheHydratedRef = useRef(false);
+  const hidingSplashRef = useRef(false);
+  const deferredStartedRef = useRef(false);
+  const taskMsRef = useRef<Record<string, number>>({});
 
-  /** Hydrate saved session + tickets + cart so UI opens with last data (no empty flash). */
+  // ── Critical path: session only ────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      await ensureStaffAccount();
-      const [
-        loggedIn,
-        savedName,
-        pin,
-        unavailable,
-        unavailableMenu,
-        tickets,
-        uiCache,
-      ] = await Promise.all([
-        loadLoggedIn(),
-        loadNickname(),
-        loadPin(),
-        loadUnavailableIngredients(),
-        loadUnavailableIds(),
-        loadKitchenTickets(),
-        loadUiCache(),
-      ]);
+      startupMark('critical_hydrate_start');
+
+      const sessionTask = await timedAsync('early_session', () =>
+        earlySessionPromise,
+      );
+      taskMsRef.current.early_session = sessionTask.ms;
       if (cancelled) return;
 
+      const { loggedIn, nickname: savedName, pin } = sessionTask.value;
       setNickname(savedName);
       setStaffPin(pin);
       setHasAccount(pin.length === 4);
+      setScreen(loggedIn ? 'placeOrder' : 'login');
+      setAuthChecked(true);
+      startupMark('critical_hydrate_done');
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // ── Persist tickets only after deferred hydrate (avoid wiping storage) ─
+  useEffect(() => {
+    if (!ticketsHydratedRef.current) return;
+    void saveKitchenTickets(kitchenTickets);
+  }, [kitchenTickets]);
+
+  useEffect(() => {
+    if (!uiCacheHydratedRef.current) return;
+    void saveUiCache({
+      cart,
+      cartNotes,
+      cartEggs,
+      tableNumber,
+      lang,
+      orderSeq: orderSeqRef.current,
+    });
+  }, [cart, cartNotes, cartEggs, tableNumber, lang]);
+
+  // ── Hide splash as soon as Home has mounted (no wait for tickets/fonts) ─
+  useEffect(() => {
+    if (!authChecked || !homeReady || hidingSplashRef.current) return;
+    hidingSplashRef.current = true;
+    startupMark('home_ready_hiding_splash');
+
+    let cancelled = false;
+    SplashScreen.hideAsync()
+      .catch(() => undefined)
+      .finally(() => {
+        if (cancelled) return;
+        dismissNativeSplashCover();
+        startupMark('splash_hideAsync_done');
+        startupSummary(taskMsRef.current);
+        setBridgeVisible(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authChecked, homeReady]);
+
+  // ── Deferred: tickets / cache / fonts — start with session, not after idle ─
+  useEffect(() => {
+    if (!authChecked || deferredStartedRef.current) return;
+    deferredStartedRef.current = true;
+    startupMark('deferred_hydrate_start');
+
+    void (async () => {
+      const heavy = await timedAsync('deferred_storage', () =>
+        Promise.all([
+          loadKitchenTickets(),
+          loadUnavailableIngredients(),
+          loadUnavailableIds(),
+          loadUiCache(),
+        ]),
+      );
+      taskMsRef.current.deferred_storage = heavy.ms;
+
+      const [tickets, unavailable, unavailableMenu, uiCache] = heavy.value;
+
       setUnavailableIngredients(unavailable);
       setUnavailableIds(unavailableMenu);
       setKitchenTickets(tickets);
@@ -171,70 +239,34 @@ export default function App() {
       }
       orderSeqRef.current = nextSeq;
 
-      setScreen(loggedIn ? 'placeOrder' : 'login');
-      setStorageReady(true);
-      setAuthChecked(true);
+      ticketsHydratedRef.current = true;
+      uiCacheHydratedRef.current = true;
+      startupMark('deferred_hydrate_done');
+
+      whenIdle(() => {
+        void timedAsync('deferred_fonts', () =>
+          Font.loadAsync(lineFontSources),
+        ).then((fonts) => {
+          taskMsRef.current.deferred_fonts = fonts.ms;
+          startupMark('fonts_deferred_loaded');
+        });
+      });
     })();
-    return () => {
-      cancelled = true;
-    };
+  }, [authChecked]);
+
+  const onHomeReady = useCallback(() => {
+    setHomeReady(true);
   }, []);
 
+  // Prefetch lazy screens after splash so the first tap doesn't flash APP_BG.
   useEffect(() => {
-    if (!storageReady) return;
-    void saveKitchenTickets(kitchenTickets);
-  }, [kitchenTickets, storageReady]);
-
-  useEffect(() => {
-    if (!storageReady) return;
-    void saveUiCache({
-      cart,
-      cartNotes,
-      cartEggs,
-      tableNumber,
-      lang,
-      orderSeq: orderSeqRef.current,
-    });
-  }, [cart, cartNotes, cartEggs, tableNumber, lang, storageReady, kitchenTickets]);
-
-  useEffect(() => {
-    if (
-      !fontsLoaded ||
-      !splashImageReady ||
-      !authChecked ||
-      !appReady ||
-      finishingRef.current
-    ) {
-      return;
-    }
-    finishingRef.current = true;
-
-    let cancelled = false;
-
-    const hold = setTimeout(() => {
-      if (cancelled) return;
-
-      InteractionManager.runAfterInteractions(() => {
-        if (cancelled) return;
-
-        // Hide the native Android/iOS splash (system layer).
-        SplashScreen.hideAsync()
-          .catch(() => undefined)
-          .finally(() => {
-            if (cancelled) return;
-            // Then remove the JS StartupBridge overlay → reveal app.
-            requestAnimationFrame(() => {
-              if (!cancelled) setBridgeVisible(false);
-            });
-          });
-      });
-    }, SPLASH_HOLD_MS);
-
-    return () => {
-      cancelled = true;
-      clearTimeout(hold);
-    };
-  }, [fontsLoaded, splashImageReady, authChecked, appReady]);
+    if (bridgeVisible) return;
+    void import('./screens/MenuScreen');
+    void import('./screens/CashierScreen');
+    void import('./screens/KitchenToDo');
+    void import('./screens/ConfirmOrder');
+    void import('./screens/NoIngredient');
+  }, [bridgeVisible]);
 
   async function handleUnavailableIngredients(names: string[]) {
     setUnavailableIngredients(names);
@@ -261,7 +293,7 @@ export default function App() {
     setCartEggs({});
     setTableNumber('');
     setScreen('login');
-    if (storageReady) {
+    if (uiCacheHydratedRef.current) {
       void saveUiCache({
         cart: {},
         cartNotes: {},
@@ -314,7 +346,9 @@ export default function App() {
           bridgeVisible ? 'dark' : screen === 'login' ? 'dark' : 'light'
         }
       />
-      <View style={styles.root}>
+      <View
+        style={[styles.root, bridgeVisible ? styles.rootWhileSplash : null]}
+      >
         <PinModal
           visible={kitchenPinOpen}
           lang={lang}
@@ -325,118 +359,119 @@ export default function App() {
           onClose={() => setKitchenPinOpen(false)}
         />
 
-        {/* First paint under splash — restore session or show login. */}
-        {splashImageReady && authChecked && fontsLoaded ? (
-          screen === 'login' ? (
-            <Login
-              lang={lang}
-              setLang={setLang}
-              isRegister={!hasAccount}
-              initialNickname={nickname}
-              savedPin={staffPin}
-              onLogin={handleLogin}
-              onReady={() => setAppReady(true)}
-            />
-          ) : screen === 'placeOrder' ? (
-            <PlaceOrder
-              tickets={kitchenTickets}
-              setTickets={setKitchenTickets}
-              lang={lang}
-              setLang={setLang}
-              nickname={nickname}
-              cashierPin={staffPin}
-              onPlaceOrder={() => setScreen('menu')}
-              onOpenCashier={confirmEnterCashier}
-              onOpenKitchen={requestEnterKitchen}
-              onLogout={handleLogout}
-              onReady={() => setAppReady(true)}
-            />
-          ) : screen === 'cashier' ? (
-            <CashierScreen
-              tickets={kitchenTickets}
-              setTickets={setKitchenTickets}
-              lang={lang}
-              setLang={setLang}
-              nickname={nickname}
-              cashierPin={staffPin}
-              onBack={() => setScreen('placeOrder')}
-              onOpenKitchen={requestEnterKitchen}
-              onLogout={handleLogout}
-            />
-          ) : screen === 'kitchen' ? (
-            <KitchenToDo
-              tickets={kitchenTickets}
-              setTickets={setKitchenTickets}
-              onBack={() => setScreen('placeOrder')}
-              onOpenNoIngredient={() => setScreen('noIngredient')}
-            />
-          ) : screen === 'noIngredient' ? (
-            <NoIngredient
-              unavailableIngredients={unavailableIngredients}
-              setUnavailableIngredients={handleUnavailableIngredients}
-              unavailableIds={unavailableIds}
-              setUnavailableIds={handleUnavailableIds}
-              onBack={() => setScreen('kitchen')}
-            />
-          ) : screen === 'menu' ? (
-            <MenuScreen
-              cart={cart}
-              setCart={setCart}
-              cartNotes={cartNotes}
-              setCartNotes={setCartNotes}
-              cartEggs={cartEggs}
-              setCartEggs={setCartEggs}
-              lang={lang}
-              setLang={setLang}
-              nickname={nickname}
-              unavailableIngredients={unavailableIngredients}
-              unavailableIds={unavailableIds}
-              onBack={() => setScreen('placeOrder')}
-              onPlaceOrder={() => setScreen('confirm')}
-              onOpenCashier={confirmEnterCashier}
-              onOpenKitchen={requestEnterKitchen}
-              onLogout={handleLogout}
-              onReady={() => setAppReady(true)}
-            />
-          ) : (
-            <ConfirmOrder
-              cart={cart}
-              cartNotes={cartNotes}
-              cartEggs={cartEggs}
-              tableNumber={tableNumber}
-              setTableNumber={setTableNumber}
-              lang={lang}
-              onBack={() => setScreen('menu')}
-              onConfirmed={(paymentMethod, paymentEvidenceUri) => {
-                const orderNo = String(orderSeqRef.current++).padStart(3, '0');
-                const ticket = createKitchenTicketFromCart(
-                  cart,
-                  tableNumber,
-                  orderNo,
-                  cartNotes,
-                  cartEggs,
-                  {
-                    staffName: nickname,
-                    paymentMethod,
-                    paymentEvidenceUri,
-                  },
-                );
-                if (ticket) {
-                  setKitchenTickets((prev) => [ticket, ...prev]);
-                }
-                setCart({});
-                setCartNotes({});
-                setCartEggs({});
-                setTableNumber('');
-                setScreen('placeOrder');
-              }}
-            />
-          )
+        {authChecked ? (
+          <Suspense
+            fallback={<View style={styles.screenFallback} />}
+          >
+            {screen === 'login' ? (
+              <Login
+                lang={lang}
+                setLang={setLang}
+                isRegister={!hasAccount}
+                initialNickname={nickname}
+                savedPin={staffPin}
+                onLogin={handleLogin}
+                onReady={onHomeReady}
+              />
+            ) : screen === 'placeOrder' ? (
+              <PlaceOrder
+                tickets={kitchenTickets}
+                setTickets={setKitchenTickets}
+                lang={lang}
+                setLang={setLang}
+                nickname={nickname}
+                cashierPin={staffPin}
+                onPlaceOrder={() => setScreen('menu')}
+                onOpenCashier={confirmEnterCashier}
+                onOpenKitchen={requestEnterKitchen}
+                onLogout={handleLogout}
+                onReady={onHomeReady}
+              />
+            ) : screen === 'cashier' ? (
+              <CashierScreen
+                tickets={kitchenTickets}
+                setTickets={setKitchenTickets}
+                lang={lang}
+                setLang={setLang}
+                nickname={nickname}
+                cashierPin={staffPin}
+                onBack={() => setScreen('placeOrder')}
+                onOpenKitchen={requestEnterKitchen}
+                onLogout={handleLogout}
+              />
+            ) : screen === 'kitchen' ? (
+              <KitchenToDo
+                tickets={kitchenTickets}
+                setTickets={setKitchenTickets}
+                onBack={() => setScreen('placeOrder')}
+                onOpenNoIngredient={() => setScreen('noIngredient')}
+              />
+            ) : screen === 'noIngredient' ? (
+              <NoIngredient
+                unavailableIngredients={unavailableIngredients}
+                setUnavailableIngredients={handleUnavailableIngredients}
+                unavailableIds={unavailableIds}
+                setUnavailableIds={handleUnavailableIds}
+                onBack={() => setScreen('kitchen')}
+              />
+            ) : screen === 'menu' ? (
+              <MenuScreen
+                cart={cart}
+                setCart={setCart}
+                cartNotes={cartNotes}
+                setCartNotes={setCartNotes}
+                cartEggs={cartEggs}
+                setCartEggs={setCartEggs}
+                lang={lang}
+                setLang={setLang}
+                nickname={nickname}
+                unavailableIngredients={unavailableIngredients}
+                unavailableIds={unavailableIds}
+                onBack={() => setScreen('placeOrder')}
+                onPlaceOrder={() => setScreen('confirm')}
+                onOpenCashier={confirmEnterCashier}
+                onOpenKitchen={requestEnterKitchen}
+                onLogout={handleLogout}
+                onReady={onHomeReady}
+              />
+            ) : (
+              <ConfirmOrder
+                cart={cart}
+                cartNotes={cartNotes}
+                cartEggs={cartEggs}
+                tableNumber={tableNumber}
+                setTableNumber={setTableNumber}
+                lang={lang}
+                onBack={() => setScreen('menu')}
+                onConfirmed={(paymentMethod, paymentEvidenceUri) => {
+                  const orderNo = String(orderSeqRef.current++).padStart(3, '0');
+                  const ticket = createKitchenTicketFromCart(
+                    cart,
+                    tableNumber,
+                    orderNo,
+                    cartNotes,
+                    cartEggs,
+                    {
+                      staffName: nickname,
+                      paymentMethod,
+                      paymentEvidenceUri,
+                    },
+                  );
+                  if (ticket) {
+                    setKitchenTickets((prev) => [ticket, ...prev]);
+                  }
+                  setCart({});
+                  setCartNotes({});
+                  setCartEggs({});
+                  setTableNumber('');
+                  setScreen('placeOrder');
+                }}
+              />
+            )}
+          </Suspense>
         ) : null}
 
-        {bridgeVisible ? (
-          <StartupBridge onImageReady={() => setSplashImageReady(true)} />
-        ) : null}
+        {bridgeVisible ? <StartupBridge /> : null}
       </View>
     </SafeAreaProvider>
   );
@@ -445,10 +480,18 @@ export default function App() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
+    backgroundColor: APP_BG,
+  },
+  /** Yellow only while app-icon splash is up — then back to dark app chrome. */
+  rootWhileSplash: {
     backgroundColor: SPLASH_BG,
   },
+  screenFallback: {
+    flex: 1,
+    backgroundColor: APP_BG,
+  },
   bridge: {
-    ...StyleSheet.absoluteFill,
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: SPLASH_BG,
     alignItems: 'center',
     justifyContent: 'center',

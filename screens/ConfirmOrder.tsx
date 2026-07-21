@@ -9,13 +9,14 @@ import {
   Keyboard,
   Pressable,
   StyleSheet,
+  Text,
+  TextInput,
   View,
   type ImageSourcePropType,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { SuccessPopup } from '../components/SuccessPopup';
-import { Text, TextInput } from '../components/UiText';
 import { EGG_ADDON, findMenuItem } from '../data/menu';
 import { colors } from '../utils/colors';
 import { formatBaht } from '../utils/format';

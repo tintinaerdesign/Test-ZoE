@@ -1,7 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Modal, Pressable, StyleSheet } from 'react-native';
-
-import { Text, TextInput } from './UiText';
+import { Modal, Pressable, StyleSheet, Text, TextInput } from 'react-native';
 import { colors } from '../utils/colors';
 
 type Props = {

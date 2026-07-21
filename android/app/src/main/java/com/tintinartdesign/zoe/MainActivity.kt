@@ -1,55 +1,58 @@
 package com.tintinartdesign.zoe
 
 import android.graphics.Color
+import android.graphics.PixelFormat
 import android.os.Build
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
-import android.view.ViewGroup
+import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.ImageView
 
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
-import com.facebook.react.bridge.ReactMarker
-import com.facebook.react.bridge.ReactMarkerConstants
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.fabricEnabled
 import com.facebook.react.defaults.DefaultReactActivityDelegate
 
 import expo.modules.ReactActivityDelegateWrapper
 import expo.modules.splashscreen.SplashScreenManager
 
+/**
+ * Holds a WindowManager overlay (above RN SurfaceView) so the sequence
+ * system-splash → black gap → JS bridge never flashes a different color.
+ *
+ * A normal View inside android.R.id.content sits UNDER Fabric SurfaceView,
+ * so it cannot cover the gap. WindowManager panel can.
+ */
 class MainActivity : ReactActivity() {
-  private var bundleCover: View? = null
-  private var coverListener: ReactMarker.MarkerListener? = null
+  private var windowCover: View? = null
 
   override fun onCreate(savedInstanceState: Bundle?) {
-    // Must register before super.onCreate so Android splash can be dismissed from JS
     SplashScreenManager.registerOnActivity(this)
-    // Hold native splash for the whole Metro/JS bundle load — only JS hideAsync() dismisses it.
     SplashScreenManager.preventAutoHideCalled = true
     setTheme(R.style.AppTheme)
     super.onCreate(null)
 
-    // Android 14/15 debug often drops the system SplashScreen early → black RN SurfaceView.
-    // A normal View overlay sits ABOVE that surface and shows yellow + app-icon until JS paints.
-    installBundleSplashCover()
+    val yellow = Color.parseColor("#FFE600")
+    window.decorView.setBackgroundColor(yellow)
+
+    // Token may be null until the window is attached — retry on next frame.
+    window.decorView.post { installWindowSplashCover() }
   }
 
-  /**
-   * Full-screen brand cover over the React root. Unlike windowBackground / SplashScreen API,
-   * this View composites above SurfaceView so Metro bundling does not flash black.
-   * Removed on CONTENT_APPEARED when JS StartupBridge takes over.
-   */
-  private fun installBundleSplashCover() {
-    val content = findViewById<ViewGroup>(android.R.id.content) ?: return
-    if (content.findViewById<View>(R.id.zoe_bundle_splash_cover) != null) return
+  private fun installWindowSplashCover() {
+    if (windowCover != null || isFinishing) return
+
+    val token = window.decorView.windowToken
+    if (token == null) {
+      window.decorView.post { installWindowSplashCover() }
+      return
+    }
 
     val yellow = Color.parseColor("#FFE600")
     val cover = FrameLayout(this).apply {
-      id = R.id.zoe_bundle_splash_cover
       setBackgroundColor(yellow)
-      elevation = 10_000f
       isClickable = true
       importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
     }
@@ -67,47 +70,54 @@ class MainActivity : ReactActivity() {
       FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER),
     )
 
-    content.addView(
-      cover,
-      FrameLayout.LayoutParams(
-        ViewGroup.LayoutParams.MATCH_PARENT,
-        ViewGroup.LayoutParams.MATCH_PARENT,
-      ),
-    )
-    bundleCover = cover
-
-    val listener = ReactMarker.MarkerListener { name, _, _ ->
-      if (name == ReactMarkerConstants.CONTENT_APPEARED) {
-        runOnUiThread { dismissBundleSplashCover() }
-      }
+    val lp = WindowManager.LayoutParams(
+      WindowManager.LayoutParams.MATCH_PARENT,
+      WindowManager.LayoutParams.MATCH_PARENT,
+      WindowManager.LayoutParams.TYPE_APPLICATION_PANEL,
+      (
+        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+          or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+          or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+          or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+        ),
+      PixelFormat.OPAQUE,
+    ).apply {
+      this.token = token
+      gravity = Gravity.TOP or Gravity.START
+      title = "ZoeSplashCover"
     }
-    coverListener = listener
-    ReactMarker.addListener(listener)
+
+    try {
+      windowManager.addView(cover, lp)
+      windowCover = cover
+    } catch (_: Exception) {
+      // Retry once if the window was mid-transition.
+      window.decorView.postDelayed({ installWindowSplashCover() }, 16L)
+    }
   }
 
-  private fun dismissBundleSplashCover() {
-    coverListener?.let { ReactMarker.removeListener(it) }
-    coverListener = null
-    val cover = bundleCover ?: return
-    bundleCover = null
-    (cover.parent as? ViewGroup)?.removeView(cover)
+  /** Called from JS (ZoeSplashCover.dismiss) when Home is ready under the JS bridge. */
+  fun dismissSplashCover() {
+    val cover = windowCover ?: return
+    windowCover = null
+    try {
+      windowManager.removeViewImmediate(cover)
+    } catch (_: Exception) {
+      try {
+        windowManager.removeView(cover)
+      } catch (_: Exception) {
+        // Already removed.
+      }
+    }
   }
 
   override fun onDestroy() {
-    dismissBundleSplashCover()
+    dismissSplashCover()
     super.onDestroy()
   }
 
-  /**
-   * Returns the name of the main component registered from JavaScript. This is used to schedule
-   * rendering of the component.
-   */
   override fun getMainComponentName(): String = "main"
 
-  /**
-   * Returns the instance of the [ReactActivityDelegate]. We use [DefaultReactActivityDelegate]
-   * which enables New Architecture with a single boolean flag [fabricEnabled].
-   */
   override fun createReactActivityDelegate(): ReactActivityDelegate {
     return ReactActivityDelegateWrapper(
           this,
@@ -119,11 +129,6 @@ class MainActivity : ReactActivity() {
           ){})
   }
 
-  /**
-    * Align the back button behavior with Android S
-    * where moving root activities to background instead of finishing activities.
-    * @see <a href="https://developer.android.com/reference/android/app/Activity#onBackPressed()">onBackPressed</a>
-    */
   override fun invokeDefaultOnBackPressed() {
       if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.R) {
           if (!moveTaskToBack(false)) {

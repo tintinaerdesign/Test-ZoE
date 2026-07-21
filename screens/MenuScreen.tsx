@@ -4,12 +4,13 @@ import {
   Animated,
   FlatList,
   Image,
-  InteractionManager,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
   StyleSheet,
+  Text,
+  TextInput,
   useWindowDimensions,
   View,
 } from 'react-native';
@@ -20,7 +21,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NoteModal } from '../components/NoteModal';
 import { OptionsModal } from '../components/OptionsModal';
 import { StaffNav } from '../components/StaffNav';
-import { Text, TextInput } from '../components/UiText';
+import { afterFirstPaint } from '../utils/schedule';
 import { isOptionAvailable } from '../data/ingredients';
 import {
   EGG_ADDON,
@@ -196,7 +197,7 @@ export function MenuScreen({
   function markMenuReady() {
     if (readySent.current || !onReady) return;
     readySent.current = true;
-    InteractionManager.runAfterInteractions(() => {
+    afterFirstPaint(() => {
       onReady();
     });
   }
@@ -220,9 +221,12 @@ export function MenuScreen({
 
   const visibleMenu = MENU.filter((item) => {
     if (!query) return true;
+    const needle = search.trim();
     return (
       item.name.toLowerCase().includes(query) ||
-      item.nameTh.includes(search.trim())
+      item.nameTh.includes(needle) ||
+      (item.aliases?.some((alias) => alias.toLowerCase().includes(query)) ??
+        false)
     );
   });
 

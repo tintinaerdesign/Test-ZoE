@@ -2,6 +2,5 @@
   <color name="splashscreen_background">#FFE600</color>
   <color name="iconBackground">#FFE600</color>
   <color name="colorPrimary">#FFE600</color>
-  <!-- Yellow until JS paints — avoids black RN SurfaceView during Metro load -->
   <color name="activityBackground">#FFE600</color>
 </resources>

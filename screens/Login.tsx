@@ -2,17 +2,16 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useEffect, useRef, useState } from 'react';
 import {
   Image,
-  InteractionManager,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
   StyleSheet,
+  Text,
+  TextInput,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-
-import { Text, TextInput } from '../components/UiText';
 import { colors } from '../utils/colors';
 
 type PinStep = 'enter' | 'confirm';
@@ -91,9 +90,7 @@ export function Login({
   useEffect(() => {
     if (readySent.current || !onReady) return;
     readySent.current = true;
-    InteractionManager.runAfterInteractions(() => {
-      onReady();
-    });
+    onReady();
   }, [onReady]);
 
   useEffect(() => {

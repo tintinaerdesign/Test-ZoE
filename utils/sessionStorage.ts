@@ -60,9 +60,38 @@ export async function saveStaffAccount(
   }
 }
 
-/** Ensure the known staff account (tintin / 5972) exists in storage. */
+/** Ensure the known staff account exists — write only on first install (skip if PIN present). */
 export async function ensureStaffAccount(): Promise<void> {
+  try {
+    const existing = await AsyncStorage.getItem(PIN_KEY);
+    if (existing != null && existing.length === 4) return;
+  } catch {
+    // Fall through and try to seed.
+  }
   await saveStaffAccount(STAFF_ACCOUNT.nickname, STAFF_ACCOUNT.pin);
+}
+
+/** One round-trip for startup: loggedIn + nickname + PIN. */
+export async function loadSessionBundle(): Promise<{
+  loggedIn: boolean;
+  nickname: string;
+  pin: string;
+}> {
+  try {
+    const pairs = await AsyncStorage.multiGet([
+      LOGGED_IN_KEY,
+      NICKNAME_KEY,
+      PIN_KEY,
+    ]);
+    const map = Object.fromEntries(pairs);
+    return {
+      loggedIn: map[LOGGED_IN_KEY] === '1',
+      nickname: map[NICKNAME_KEY] ?? '',
+      pin: map[PIN_KEY] ?? '',
+    };
+  } catch {
+    return { loggedIn: false, nickname: '', pin: '' };
+  }
 }
 
 export async function saveSession(

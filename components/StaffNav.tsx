@@ -1,7 +1,5 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { Pressable, StyleSheet, View } from 'react-native';
-
-import { Text } from './UiText';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors } from '../utils/colors';
 
 type Props = {

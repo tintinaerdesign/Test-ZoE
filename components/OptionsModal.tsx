@@ -1,8 +1,6 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import type { ComponentProps } from 'react';
-import { Modal, Pressable, StyleSheet, View } from 'react-native';
-
-import { Text } from './UiText';
+import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { isOptionAvailable } from '../data/ingredients';
 import type { MenuItem, MenuOption } from '../data/menu';
 import { colors } from '../utils/colors';

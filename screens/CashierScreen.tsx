@@ -6,13 +6,13 @@ import {
   Modal,
   Pressable,
   StyleSheet,
+  Text,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PinModal } from '../components/PinModal';
 import { StaffNav } from '../components/StaffNav';
-import { Text } from '../components/UiText';
 import {
   lineIsDone,
   type CashPayStatus,
