@@ -6,9 +6,23 @@ POS / kitchen app สำหรับร้านอาหาร — สั่ง
   <img src="docs/screenshots/app-icon.png" alt="ZoE app icon" width="120" />
 </p>
 
+## ภาพหน้าจอล่าสุด
+
+Login / PIN · ตั้งชื่อเล่น & ตำแหน่ง · เมนูอาหาร
+
 <p align="center">
-  <img src="docs/screenshots/00-splash.png" alt="Splash screen" width="220" />
+  <img src="docs/screenshots/06-login.png" alt="Login PIN" width="220" />
+  &nbsp;
+  <img src="docs/screenshots/07-nickname-role.png" alt="Set nickname and role" width="220" />
+  &nbsp;
+  <img src="docs/screenshots/08-food-menu.png" alt="Food menu" width="220" />
 </p>
+
+| หน้าจอ | รายละเอียด |
+|--------|------------|
+| **Login** | กรอก id + PIN 6 หลัก · สลับภาษา EN/TH |
+| **ตั้งชื่อเล่น / ตำแหน่ง** | เลือก Waiter · Cashier · Kitchen · Admin |
+| **เมนูอาหาร** | รายการเมนู + ราคา · ค้นหา · ธีมมืด |
 
 ---
 
@@ -21,11 +35,23 @@ POS / kitchen app สำหรับร้านอาหาร — สั่ง
 | **Confirm Order** | ยืนยันโต๊ะ + ชำระเงิน (เงินสด / QR + ถ่ายหลักฐาน) |
 | **Cashier Mode** | ดูการชำระของพนักงานทุกคน · ยืนยันเงินสด · ดูรูป QR |
 | **Kitchen** | รวมยอดทำครัว / รอเสิร์ฟ · สลับวัตถุดิบหมด |
-| **Login** | nickname + PIN 4 หลัก |
+| **Login** | nickname + PIN 6 หลัก |
 
 ### Splash
 
 ![Splash](docs/screenshots/00-splash.png)
+
+### Login / PIN
+
+![Login](docs/screenshots/06-login.png)
+
+### ตั้งชื่อเล่น & ตำแหน่ง
+
+![Nickname Role](docs/screenshots/07-nickname-role.png)
+
+### เมนูอาหาร
+
+![Food Menu](docs/screenshots/08-food-menu.png)
 
 ### Place Order (พนักงาน)
 
@@ -51,7 +77,7 @@ POS / kitchen app สำหรับร้านอาหาร — สั่ง
 
 ## คุณสมบัติหลัก
 
-- **Login / session** — บัญชีตัวอย่าง `tintin` / PIN `5972` · ค้างล็อกอินในเครื่อง
+- **Login / session** — บัญชีตัวอย่าง `tintin` / PIN `597200` · ค้างล็อกอินในเครื่อง
 - **Place Order** — แสดงเฉพาะบิลเงินสดของตัวเองที่ยังไม่จ่าย · ยืนยันชำระด้วย PIN
 - **Cashier (ปุ่ม C)** — เห็นบิลทุกคน · unpaid ขึ้นก่อน · ดูรูปหลักฐานได้
 - **Kitchen (ไอคอนหม้อ)** — ต้องใส่ PIN · รวมจำนวนตามเมนู · เช็คเสร็จ / เสิร์ฟ
@@ -64,7 +90,8 @@ POS / kitchen app สำหรับร้านอาหาร — สั่ง
 ## สแตก
 
 - Expo ~57 · React Native 0.86 · TypeScript
-- AsyncStorage (session, tickets, cart cache, availability)
+- AsyncStorage (session, cart cache, availability · สำรอง tickets)
+- **Supabase** (ออเดอร์กลาง — หลายเครื่อง / คนละ Wi‑Fi / เน็ตมือถือ)
 - expo-splash-screen · expo-font · expo-image-picker · expo-file-system
 
 ---
@@ -75,13 +102,42 @@ POS / kitchen app สำหรับร้านอาหาร — สั่ง
 ZoE/
 ├── App.tsx                 # นำทางจอ + splash / hydrate
 ├── index.ts                # preventAutoHide + early session
-├── screens/                # Login, PlaceOrder, Menu, Confirm, Cashier, Kitchen, NoIngredient
+├── screens/                # Login, PlaceOrder, Menu, Confirm, Cashier, Kitchen, …
 ├── components/             # StaffNav, PinModal, …
 ├── data/                   # menu.ts, kitchen.ts, ingredients.ts
-├── utils/                  # storage, format, splash cover, timing
+├── utils/                  # storage, supabase, orderSync, …
+├── supabase/schema.sql     # ตาราง orders บน Supabase
 ├── assets/                 # ไอคอน, ฟอนต์, รูปเมนู
 └── docs/screenshots/       # ภาพประกอบ README
 ```
+
+---
+
+## Sync ออเดอร์ (Supabase) — ให้หลายเครื่องเห็นบิลเดียวกัน
+
+ถ้า**ยังไม่มี** `.env` แอปยังทำงานเครื่องเดียวเหมือนเดิม (AsyncStorage)
+
+### 1) สร้างตารางบน Supabase
+
+1. เปิด [supabase.com](https://supabase.com) → สร้างโปรเจกต์
+2. ไป **SQL Editor** → วางไฟล์ [`supabase/schema.sql`](supabase/schema.sql) → Run
+3. ไป **Database → Publications → supabase_realtime** → เปิดตาราง `orders`
+
+### 2) ใส่คีย์ในแอป
+
+คัดลอก `.env.example` เป็น `.env` แล้วใส่ค่าจาก **Project Settings → API**:
+
+```env
+EXPO_PUBLIC_SUPABASE_URL=https://xxxx.supabase.co
+EXPO_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOi...
+```
+
+รีสตาร์ท Metro (`npx expo start`) หลังแก้ `.env`
+
+### 3) ทดสอบ
+
+เครื่อง A สั่งอาหาร → เปิด Table Editor ดูแถวใน `orders`  
+เครื่อง B (ครัว/แคชเชียร์) ควรเห็นออเดอร์เดียวกัน
 
 ---
 
@@ -105,8 +161,8 @@ npx expo run:android
 
 | ช่อง | ค่า |
 |------|-----|
-| Nickname | `tintin` |
-| PIN | `5972` |
+| id | `tintin` |
+| PIN | `597200` |
 
 ---
 
