@@ -38,6 +38,8 @@ const COPY = {
     placeOrder: 'Place Order',
     empty: 'No orders yet',
     cashUnpaid: 'Unpaid',
+    cashPaid: 'Paid',
+    payQr: 'Paid by QR',
     markPaid: 'Confirm payment at cashier',
     latest: 'Latest',
     logout: 'Logout',
@@ -46,11 +48,16 @@ const COPY = {
     placeOrder: 'Place Order',
     empty: 'ยังไม่มีออเดอร์',
     cashUnpaid: 'ยังไม่จ่าย',
+    cashPaid: 'ชำระเงินแล้ว',
+    payQr: 'ชำระด้วย QR',
     markPaid: 'ยืนยันชำระที่แคชเชียร์',
     latest: 'ล่าสุด',
     logout: 'ออก',
   },
 };
+
+/** Waiter board keeps an order visible this long after it was placed. */
+const ORDER_VISIBLE_MS = 60 * 60 * 1000;
 
 function ticketTotal(ticket: KitchenTicket) {
   return ticket.lines.reduce((sum, line) => {
@@ -62,24 +69,36 @@ function ticketTotal(ticket: KitchenTicket) {
   }, 0);
 }
 
+function isCashUnpaid(ticket: KitchenTicket) {
+  return (
+    ticket.paymentMethod === 'cash' && ticket.cashStatus !== 'paid_at_cashier'
+  );
+}
+
 type BillRowProps = {
   item: KitchenTicket;
   isLatest: boolean;
   cashUnpaidLabel: string;
+  cashPaidLabel: string;
+  payQrLabel: string;
   markPaidLabel: string;
   latestLabel: string;
   onMarkPaid: (ticketId: string) => void;
 };
 
-const UnpaidBillRow = memo(function UnpaidBillRow({
+const OrderBillRow = memo(function OrderBillRow({
   item,
   isLatest,
   cashUnpaidLabel,
+  cashPaidLabel,
+  payQrLabel,
   markPaidLabel,
   latestLabel,
   onMarkPaid,
 }: BillRowProps) {
   const total = useMemo(() => ticketTotal(item), [item]);
+  const unpaid = isCashUnpaid(item);
+  const isQr = item.paymentMethod === 'qr';
 
   return (
     <View style={[styles.card, isLatest && styles.cardLatest]}>
@@ -103,27 +122,53 @@ const UnpaidBillRow = memo(function UnpaidBillRow({
       </View>
 
       <View style={styles.cashBlock}>
-        <View style={[styles.payBar, styles.payBarCashUnpaid]}>
-          <MaterialCommunityIcons name="cash" size={16} color="#111111" />
-          <Text style={styles.payBarText}>{cashUnpaidLabel}</Text>
-          <Text style={styles.payBarAmount}>{formatBaht(total)}</Text>
-        </View>
-        <Pressable
-          style={({ pressed }) => [
-            styles.markPaidBtn,
-            pressed && styles.markPaidBtnPressed,
+        <View
+          style={[
+            styles.payBar,
+            isQr
+              ? styles.payBarQr
+              : unpaid
+                ? styles.payBarCashUnpaid
+                : styles.payBarCashPaid,
           ]}
-          onPress={() => onMarkPaid(item.id)}
         >
-          <Text style={styles.markPaidText}>{markPaidLabel}</Text>
-        </Pressable>
+          <MaterialCommunityIcons
+            name={isQr ? 'qrcode' : 'cash'}
+            size={16}
+            color={unpaid || isQr ? '#111111' : '#FFFFFF'}
+          />
+          <Text
+            style={[styles.payBarText, !unpaid && !isQr && styles.payBarTextOnDark]}
+          >
+            {isQr ? payQrLabel : unpaid ? cashUnpaidLabel : cashPaidLabel}
+          </Text>
+          <Text
+            style={[
+              styles.payBarAmount,
+              !unpaid && !isQr && styles.payBarTextOnDark,
+            ]}
+          >
+            {formatBaht(total)}
+          </Text>
+        </View>
+        {unpaid ? (
+          <Pressable
+            style={({ pressed }) => [
+              styles.markPaidBtn,
+              pressed && styles.markPaidBtnPressed,
+            ]}
+            onPress={() => onMarkPaid(item.id)}
+          >
+            <Text style={styles.markPaidText}>{markPaidLabel}</Text>
+          </Pressable>
+        ) : null}
       </View>
     </View>
   );
 });
 
 /**
- * Waiter home — Place Order + own unpaid cash bills only.
+ * Waiter home — Place Order + own orders from the last hour.
  */
 export function PlaceOrder({
   tickets,
@@ -143,6 +188,8 @@ export function PlaceOrder({
   const readySent = useRef(false);
   const pinTicketIdRef = useRef<string | null>(null);
   const [pinTicketId, setPinTicketId] = useState<string | null>(null);
+  /** Bumps so the 1-hour window re-filters without a full remount. */
+  const [nowTick, setNowTick] = useState(() => Date.now());
 
   useEffect(() => {
     if (readySent.current || !onReady) return;
@@ -150,20 +197,24 @@ export function PlaceOrder({
     onReady();
   }, [onReady]);
 
-  /** Own unpaid cash bills only — paid / QR cards stay on Cashier. */
+  /** Drop cards when they age past 1 hour (check every 30s). */
+  useEffect(() => {
+    const id = setInterval(() => setNowTick(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  /** Own tickets still within 1 hour of order time (paid ones stay visible too). */
   const ordered = useMemo(() => {
     const me = nickname?.trim().toLowerCase() ?? '';
+    const cutoff = nowTick - ORDER_VISIBLE_MS;
     return tickets
       .filter((ticket) => {
         if (!me) return false;
         if ((ticket.staffName?.trim().toLowerCase() ?? '') !== me) return false;
-        return (
-          ticket.paymentMethod === 'cash' &&
-          ticket.cashStatus !== 'paid_at_cashier'
-        );
+        return ticket.createdAt >= cutoff;
       })
       .sort((a, b) => b.createdAt - a.createdAt);
-  }, [tickets, nickname]);
+  }, [tickets, nickname, nowTick]);
 
   const latestId = useMemo(() => {
     if (ordered.length === 0) return null;
@@ -197,16 +248,26 @@ export function PlaceOrder({
 
   const renderItem = useCallback(
     ({ item }: { item: KitchenTicket }) => (
-      <UnpaidBillRow
+      <OrderBillRow
         item={item}
         isLatest={item.id === latestId}
         cashUnpaidLabel={t.cashUnpaid}
+        cashPaidLabel={t.cashPaid}
+        payQrLabel={t.payQr}
         markPaidLabel={t.markPaid}
         latestLabel={t.latest}
         onMarkPaid={openCashierPin}
       />
     ),
-    [latestId, openCashierPin, t.cashUnpaid, t.latest, t.markPaid],
+    [
+      latestId,
+      openCashierPin,
+      t.cashPaid,
+      t.cashUnpaid,
+      t.latest,
+      t.markPaid,
+      t.payQr,
+    ],
   );
 
   return (
@@ -363,14 +424,23 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingHorizontal: 12,
   },
+  payBarQr: {
+    backgroundColor: '#81C784',
+  },
   payBarCashUnpaid: {
     backgroundColor: '#FFB74D',
+  },
+  payBarCashPaid: {
+    backgroundColor: '#2E7D32',
   },
   payBarText: {
     color: '#111111',
     fontSize: 24,
     fontWeight: '400',
     flex: 1,
+  },
+  payBarTextOnDark: {
+    color: '#FFFFFF',
   },
   payBarAmount: {
     color: '#111111',

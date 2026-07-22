@@ -1,9 +1,12 @@
 import { ensureStaffAccount, loadSessionBundle } from './sessionStorage';
+import type { StaffRole } from './sessionStorage';
 import { startupMark } from './startupTiming';
 
 export type EarlySession = {
   loggedIn: boolean;
+  staffId: string;
   nickname: string;
+  role: StaffRole | '';
   pin: string;
 };
 

@@ -1,10 +1,10 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useMemo, useRef, useState } from 'react';
 import {
-  FlatList,
   Image,
   Modal,
   Pressable,
+  SectionList,
   StyleSheet,
   Text,
   View,
@@ -22,6 +22,15 @@ import {
 import { EGG_ADDON, findMenuItem } from '../data/menu';
 import { colors } from '../utils/colors';
 import { formatBaht, formatOrderTime } from '../utils/format';
+
+type GroupMode = 'time' | 'staff';
+
+type TicketSection = {
+  key: string;
+  title: string;
+  sortKey: number;
+  data: KitchenTicket[];
+};
 
 type Props = {
   /** All staff payment tickets. */
@@ -54,6 +63,10 @@ const COPY = {
     closePhoto: 'Close',
     logout: 'Logout',
     back: 'Back',
+    groupBy: 'Group by',
+    groupTime: 'Order time',
+    groupStaff: 'Staff',
+    unknownStaff: 'Unknown',
   },
   th: {
     title: 'Cashier Mode',
@@ -70,8 +83,53 @@ const COPY = {
     closePhoto: 'ปิด',
     logout: 'ออก',
     back: 'กลับ',
+    groupBy: 'แยกตาม',
+    groupTime: 'เวลาที่สั่ง',
+    groupStaff: 'ชื่อพนักงาน',
+    unknownStaff: 'ไม่ระบุ',
   },
 };
+
+function isUnpaidCash(ticket: KitchenTicket) {
+  return (
+    ticket.paymentMethod === 'cash' && ticket.cashStatus !== 'paid_at_cashier'
+  );
+}
+
+function staffLabel(ticket: KitchenTicket, unknown: string) {
+  const name = ticket.staffName?.trim();
+  return name || unknown;
+}
+
+/** Bucket by local hour of order time. */
+function timeBucket(createdAt: number) {
+  const d = new Date(createdAt);
+  const start = new Date(
+    d.getFullYear(),
+    d.getMonth(),
+    d.getDate(),
+    d.getHours(),
+    0,
+    0,
+    0,
+  );
+  const hh = String(d.getHours()).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  return {
+    key: `${start.getTime()}`,
+    sortKey: start.getTime(),
+    titleEn: `${day}/${month} · ${hh}:00`,
+    titleTh: `${day}/${month} · ${hh}:00 น.`,
+  };
+}
+
+function sortTickets(a: KitchenTicket, b: KitchenTicket) {
+  const aUnpaid = isUnpaidCash(a) ? 0 : 1;
+  const bUnpaid = isUnpaidCash(b) ? 0 : 1;
+  if (aUnpaid !== bUnpaid) return aUnpaid - bUnpaid;
+  return b.createdAt - a.createdAt;
+}
 
 function lineLabel(line: KitchenLine) {
   const name = line.nameTh || line.name;
@@ -110,21 +168,59 @@ export function CashierScreen({
   const [expandedIds, setExpandedIds] = useState<Record<string, boolean>>({});
   const [pinTicketId, setPinTicketId] = useState<string | null>(null);
   const [photoUri, setPhotoUri] = useState<string | null>(null);
+  const [groupMode, setGroupMode] = useState<GroupMode>('time');
 
-  const ordered = useMemo(() => {
-    function isUnpaidCash(ticket: KitchenTicket) {
-      return (
-        ticket.paymentMethod === 'cash' &&
-        ticket.cashStatus !== 'paid_at_cashier'
-      );
+  const sections = useMemo((): TicketSection[] => {
+    const map = new Map<string, TicketSection>();
+
+    for (const ticket of tickets) {
+      if (groupMode === 'staff') {
+        const title = staffLabel(ticket, t.unknownStaff);
+        const key = `staff:${title}`;
+        const existing = map.get(key);
+        if (existing) {
+          existing.data.push(ticket);
+          existing.sortKey = Math.max(existing.sortKey, ticket.createdAt);
+        } else {
+          map.set(key, {
+            key,
+            title,
+            sortKey: ticket.createdAt,
+            data: [ticket],
+          });
+        }
+      } else {
+        const bucket = timeBucket(ticket.createdAt);
+        const existing = map.get(bucket.key);
+        const title = lang === 'th' ? bucket.titleTh : bucket.titleEn;
+        if (existing) {
+          existing.data.push(ticket);
+        } else {
+          map.set(bucket.key, {
+            key: bucket.key,
+            title,
+            sortKey: bucket.sortKey,
+            data: [ticket],
+          });
+        }
+      }
     }
-    return [...tickets].sort((a, b) => {
-      const aUnpaid = isUnpaidCash(a) ? 0 : 1;
-      const bUnpaid = isUnpaidCash(b) ? 0 : 1;
-      if (aUnpaid !== bUnpaid) return aUnpaid - bUnpaid;
-      return b.createdAt - a.createdAt;
+
+    const list = [...map.values()].map((section) => ({
+      ...section,
+      data: [...section.data].sort(sortTickets),
+    }));
+
+    list.sort((a, b) => {
+      if (groupMode === 'staff') {
+        if (b.sortKey !== a.sortKey) return b.sortKey - a.sortKey;
+        return a.title.localeCompare(b.title, lang === 'th' ? 'th' : 'en');
+      }
+      return b.sortKey - a.sortKey;
     });
-  }, [tickets]);
+
+    return list;
+  }, [tickets, groupMode, lang, t.unknownStaff]);
 
   function toggleExpanded(id: string) {
     setExpandedIds((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -348,12 +444,70 @@ export function CashierScreen({
 
       <Text style={styles.modeTitle}>{t.title}</Text>
 
-      <FlatList
-        data={ordered}
+      <View style={styles.groupRow}>
+        <Text style={styles.groupLabel}>{t.groupBy}</Text>
+        <View style={styles.groupToggle}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.groupChip,
+              groupMode === 'time' && styles.groupChipActive,
+              pressed && styles.groupChipPressed,
+            ]}
+            onPress={() => setGroupMode('time')}
+          >
+            <MaterialCommunityIcons
+              name="clock-outline"
+              size={16}
+              color={groupMode === 'time' ? '#111111' : colors.primary}
+            />
+            <Text
+              style={[
+                styles.groupChipText,
+                groupMode === 'time' && styles.groupChipTextActive,
+              ]}
+            >
+              {t.groupTime}
+            </Text>
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => [
+              styles.groupChip,
+              groupMode === 'staff' && styles.groupChipActive,
+              pressed && styles.groupChipPressed,
+            ]}
+            onPress={() => setGroupMode('staff')}
+          >
+            <MaterialCommunityIcons
+              name="account-outline"
+              size={16}
+              color={groupMode === 'staff' ? '#111111' : colors.primary}
+            />
+            <Text
+              style={[
+                styles.groupChipText,
+                groupMode === 'staff' && styles.groupChipTextActive,
+              ]}
+            >
+              {t.groupStaff}
+            </Text>
+          </Pressable>
+        </View>
+      </View>
+
+      <SectionList
+        sections={sections}
         keyExtractor={(item) => item.id}
+        extraData={expandedIds}
         contentContainerStyle={styles.list}
+        stickySectionHeadersEnabled={false}
         showsVerticalScrollIndicator={false}
         ListEmptyComponent={<Text style={styles.empty}>{t.empty}</Text>}
+        renderSectionHeader={({ section }) => (
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>{section.title}</Text>
+            <Text style={styles.sectionCount}>{section.data.length}</Text>
+          </View>
+        )}
         renderItem={({ item }) => {
           const expanded = !!expandedIds[item.id];
           const foodLines = item.lines.filter((l) => l.menuItemId !== 'egg');
@@ -364,7 +518,7 @@ export function CashierScreen({
                 <View style={styles.metaLeft}>
                   <View style={styles.nameRow}>
                     <Text style={styles.staffName} numberOfLines={1}>
-                      {item.staffName?.trim() || '—'}
+                      {staffLabel(item, t.unknownStaff)}
                     </Text>
                     <Text style={styles.orderTime}>
                       {formatOrderTime(item.createdAt)}
@@ -464,6 +618,66 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '900',
     letterSpacing: 0.3,
+  },
+  groupRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    flexWrap: 'wrap',
+  },
+  groupLabel: {
+    color: '#888888',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  groupToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  groupChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    minHeight: 34,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+    backgroundColor: 'transparent',
+  },
+  groupChipActive: {
+    backgroundColor: colors.primary,
+  },
+  groupChipPressed: {
+    opacity: 0.85,
+  },
+  groupChipText: {
+    color: colors.primary,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  groupChipTextActive: {
+    color: '#111111',
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: 6,
+    paddingBottom: 4,
+  },
+  sectionTitle: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  sectionCount: {
+    color: '#777777',
+    fontSize: 13,
+    fontWeight: '700',
   },
   list: {
     gap: 10,

@@ -26,6 +26,7 @@ import {
 /** Home screens only — keep eager so first paint is fast. */
 import { Login } from './screens/Login';
 import { PlaceOrder } from './screens/PlaceOrder';
+import { SetNickname } from './screens/SetNickname';
 import {
   loadUnavailableIds,
   loadUnavailableIngredients,
@@ -37,7 +38,8 @@ import { lineFontSources } from './utils/fonts';
 import { loadUiCache, saveUiCache } from './utils/localCache';
 import { dismissNativeSplashCover } from './utils/nativeSplashCover';
 import { whenIdle } from './utils/schedule';
-import { saveSession } from './utils/sessionStorage';
+import { saveNickname, saveSession, saveStaffRole } from './utils/sessionStorage';
+import type { StaffRole } from './utils/sessionStorage';
 import {
   startupMark,
   startupSummary,
@@ -101,6 +103,7 @@ function StartupBridge() {
 
 type Screen =
   | 'login'
+  | 'setNickname'
   | 'placeOrder'
   | 'cashier'
   | 'menu'
@@ -115,7 +118,9 @@ export default function App() {
   const [cartEggs, setCartEggs] = useState<Record<string, number>>({});
   const [tableNumber, setTableNumber] = useState('');
   const [lang, setLang] = useState<'en' | 'th'>('en');
+  const [staffId, setStaffId] = useState('');
   const [nickname, setNickname] = useState('');
+  const [staffRole, setStaffRole] = useState<StaffRole | ''>('');
   const [staffPin, setStaffPin] = useState('');
   const [hasAccount, setHasAccount] = useState(false);
   const [unavailableIngredients, setUnavailableIngredients] = useState<
@@ -151,11 +156,25 @@ export default function App() {
       taskMsRef.current.early_session = sessionTask.ms;
       if (cancelled) return;
 
-      const { loggedIn, nickname: savedName, pin } = sessionTask.value;
+      const {
+        loggedIn,
+        staffId: savedId,
+        nickname: savedName,
+        role: savedRole,
+        pin,
+      } = sessionTask.value;
+      setStaffId(savedId);
       setNickname(savedName);
+      setStaffRole(savedRole);
       setStaffPin(pin);
       setHasAccount(pin.length === 4);
-      setScreen(loggedIn ? 'placeOrder' : 'login');
+      if (loggedIn) {
+        setScreen(
+          savedName.trim() && savedRole ? 'placeOrder' : 'setNickname',
+        );
+      } else {
+        setScreen('login');
+      }
       setAuthChecked(true);
       startupMark('critical_hydrate_done');
     })();
@@ -204,7 +223,7 @@ export default function App() {
     };
   }, [authChecked, homeReady]);
 
-  // ── Deferred: tickets / cache / fonts — start with session, not after idle ─
+  // ── Deferred: tickets / cache / fonts — start with session ─────────────
   useEffect(() => {
     if (!authChecked || deferredStartedRef.current) return;
     deferredStartedRef.current = true;
@@ -278,11 +297,19 @@ export default function App() {
     await saveUnavailableIds(ids);
   }
 
-  async function handleLogin(name: string, pin: string) {
-    await saveSession(true, name, pin);
-    setNickname(name);
+  async function handleLogin(id: string, pin: string) {
+    await saveSession(true, id, pin);
+    setStaffId(id);
     setStaffPin(pin);
     setHasAccount(true);
+    setScreen('setNickname');
+  }
+
+  async function handleNicknameContinue(name: string, role: StaffRole) {
+    await saveNickname(name);
+    await saveStaffRole(role);
+    setNickname(name);
+    setStaffRole(role);
     setScreen('placeOrder');
   }
 
@@ -343,7 +370,11 @@ export default function App() {
     <SafeAreaProvider>
       <StatusBar
         style={
-          bridgeVisible ? 'dark' : screen === 'login' ? 'dark' : 'light'
+          bridgeVisible ||
+          screen === 'login' ||
+          screen === 'setNickname'
+            ? 'dark'
+            : 'light'
         }
       />
       <View
@@ -360,17 +391,25 @@ export default function App() {
         />
 
         {authChecked ? (
-          <Suspense
-            fallback={<View style={styles.screenFallback} />}
-          >
+          <Suspense fallback={<View style={styles.screenFallback} />}>
             {screen === 'login' ? (
               <Login
                 lang={lang}
                 setLang={setLang}
                 isRegister={!hasAccount}
-                initialNickname={nickname}
+                initialStaffId={staffId}
                 savedPin={staffPin}
                 onLogin={handleLogin}
+                onReady={onHomeReady}
+              />
+            ) : screen === 'setNickname' ? (
+              <SetNickname
+                lang={lang}
+                setLang={setLang}
+                staffId={staffId}
+                initialNickname={nickname}
+                initialRole={staffRole}
+                onContinue={handleNicknameContinue}
                 onReady={onHomeReady}
               />
             ) : screen === 'placeOrder' ? (

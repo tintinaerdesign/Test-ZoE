@@ -98,14 +98,14 @@ function buildDishGroups(
           key,
           label: lineLabel(line),
           totalQty: line.quantity,
-          cookingQty: line.cooking,
+          cookingQty: Math.min(line.cooking, line.quantity),
           waitingQty: Math.max(0, line.quantity - line.cooking),
           eggCount: eggs,
           slices: [slice],
         });
       } else {
         existing.totalQty += line.quantity;
-        existing.cookingQty += line.cooking;
+        existing.cookingQty += Math.min(line.cooking, line.quantity);
         existing.waitingQty += Math.max(0, line.quantity - line.cooking);
         existing.eggCount += eggs;
         existing.slices.push(slice);
@@ -183,14 +183,21 @@ export function KitchenToDo({
 
   const waitingToServe = useMemo(
     () =>
-      tickets
-        .filter((t) => !isTicketComplete(t))
-        .sort((a, b) => a.createdAt - b.createdAt),
+      [...tickets].sort((a, b) => {
+        // Incomplete first; keep completed cards until kitchen taps สำเร็จ.
+        const aDone = isTicketComplete(a) ? 1 : 0;
+        const bDone = isTicketComplete(b) ? 1 : 0;
+        if (aDone !== bDone) return aDone - bDone;
+        return a.createdAt - b.createdAt;
+      }),
     [tickets],
   );
 
-  /** Badge: only orders that still need serving (not ครบแล้ว). */
-  const pendingServeCount = waitingToServe.length;
+  /** Badge: only orders that still need line checks (not ครบแล้ว). */
+  const pendingServeCount = useMemo(
+    () => tickets.filter((t) => !isTicketComplete(t)).length,
+    [tickets],
+  );
 
   const activeTickets = useMemo(
     () => tickets.filter((t) => !isTicketComplete(t)),
@@ -206,22 +213,12 @@ export function KitchenToDo({
     [activeTickets],
   );
 
-  function cookedCount(station: KitchenStation, dishKeyStr: string) {
-    let count = 0;
-    for (const ticket of tickets) {
-      for (const line of ticket.lines) {
-        if (line.station === station && dishKey(line) === dishKeyStr) {
-          count += line.cooking;
-        }
-      }
-    }
-    return count;
-  }
-
   /** Mark one portion done (oldest unfinished order first). */
   function markDishCooked(station: KitchenStation, dishKeyStr: string) {
     setTickets((prev) => {
-      const oldestFirst = [...prev].sort((a, b) => a.createdAt - b.createdAt);
+      const oldestFirst = [...prev]
+        .filter((t) => !isTicketComplete(t))
+        .sort((a, b) => a.createdAt - b.createdAt);
       let targetTicketId: string | null = null;
       let targetLineId: string | null = null;
 
@@ -268,7 +265,9 @@ export function KitchenToDo({
   /** Undo one portion (newest marked first) — for accidental taps. */
   function unmarkDishCooked(station: KitchenStation, dishKeyStr: string) {
     setTickets((prev) => {
-      const newestFirst = [...prev].sort((a, b) => b.createdAt - a.createdAt);
+      const newestFirst = [...prev]
+        .filter((t) => !isTicketComplete(t))
+        .sort((a, b) => b.createdAt - a.createdAt);
       let targetTicketId: string | null = null;
       let targetLineId: string | null = null;
 
@@ -313,38 +312,47 @@ export function KitchenToDo({
     });
   }
 
+  /** Reset dish progress to 0 / total so kitchen can recount. */
+  function resetDishCooked(station: KitchenStation, dishKeyStr: string) {
+    setTickets((prev) => {
+      let changed = false;
+      const next = prev.map((ticket) => {
+        if (isTicketComplete(ticket)) return ticket;
+        let ticketChanged = false;
+        const lines = ticket.lines.map((line) => {
+          if (line.station !== station) return line;
+          if (dishKey(line) !== dishKeyStr) return line;
+          if ((Number(line.cooking) || 0) === 0 && line.isReady !== true) {
+            return line;
+          }
+          ticketChanged = true;
+          return { ...line, cooking: 0, isReady: false };
+        });
+        if (!ticketChanged) return ticket;
+        changed = true;
+        const anyCooking = lines.some((l) => (Number(l.cooking) || 0) > 0);
+        return {
+          ...ticket,
+          lines,
+          serveComplete: false,
+          status: anyCooking ? ('cooking' as const) : ('queued' as const),
+        };
+      });
+      return changed ? next : prev;
+    });
+  }
+
   function onCookProgressPress(
     station: KitchenStation,
     dishKeyStr: string,
     allDone: boolean,
   ) {
-    if (allDone) unmarkDishCooked(station, dishKeyStr);
+    if (allDone) resetDishCooked(station, dishKeyStr);
     else markDishCooked(station, dishKeyStr);
   }
 
   function markDone(ticketId: string) {
     setTickets((prev) => prev.filter((t) => t.id !== ticketId));
-  }
-
-  function toggleServeComplete(ticketId: string) {
-    setTickets((prev) => {
-      const ticket = prev.find((t) => t.id === ticketId);
-      if (!ticket) return prev;
-
-      // Already complete — keep ticket for PlaceOrder history (long-press clears).
-      if (isTicketComplete(ticket)) {
-        return prev;
-      }
-
-      return prev.map((t) => {
-        if (t.id !== ticketId) return t;
-        return {
-          ...t,
-          serveComplete: true,
-          lines: t.lines.map((l) => ({ ...l, isReady: true })),
-        };
-      });
-    });
   }
 
   function toggleLineReady(ticketId: string, lineId: string) {
@@ -391,8 +399,8 @@ export function KitchenToDo({
           <Text style={styles.emptyLine}>ยังไม่มีออเดอร์</Text>
         ) : (
           board.groups.map((group, groupIndex) => {
-            const done = cookedCount(station, group.key);
-            const allDone = done >= group.totalQty;
+            const done = group.cookingQty;
+            const allDone = group.totalQty > 0 && done >= group.totalQty;
             return (
               <Fragment key={group.key}>
                 {groupIndex > 0 ? <View style={styles.dishDivider} /> : null}
@@ -434,11 +442,13 @@ export function KitchenToDo({
                         onCookProgressPress(station, group.key, allDone)
                       }
                       onLongPress={() =>
-                        unmarkDishCooked(station, group.key)
+                        allDone
+                          ? resetDishCooked(station, group.key)
+                          : unmarkDishCooked(station, group.key)
                       }
                       hitSlop={6}
                       accessibilityLabel={
-                        allDone ? 'ยกเลิกทำเสร็จ' : 'ทำเสร็จแล้ว'
+                        allDone ? 'แก้ไข นับใหม่จาก 0' : 'ทำเสร็จแล้ว'
                       }
                     >
                       <Text style={styles.cookDoneBtnText}>✓</Text>
@@ -468,9 +478,20 @@ export function KitchenToDo({
           complete ? styles.readyCardComplete : styles.readyCardPartial,
         ]}
       >
-        <Text style={styles.readyTitle}>
-          #{item.orderNo} · {item.table} · {statusHint}
-        </Text>
+        <View style={styles.readyTitleRow}>
+          <Text
+            style={[styles.readyTitle, complete && styles.readyTitleComplete]}
+          >
+            #{item.orderNo} · {item.table} · {statusHint}
+          </Text>
+          {complete ? (
+            <MaterialCommunityIcons
+              name="check-circle"
+              size={32}
+              color="#43A047"
+            />
+          ) : null}
+        </View>
         {item.lines
           .filter((line) => line.menuItemId !== 'egg')
           .map((line) => {
@@ -486,10 +507,15 @@ export function KitchenToDo({
                 pressed && styles.readyLineBtnHover,
               ]}
             >
+              <MaterialCommunityIcons
+                name={checked ? 'check-circle' : 'checkbox-blank-circle-outline'}
+                size={22}
+                color={checked ? '#81C784' : '#888888'}
+              />
               <Text
                 style={[styles.readyLine, checked && styles.readyLineDone]}
               >
-                {checked ? '✓' : '○'} {lineLabel(line)} ×{line.quantity}
+                {lineLabel(line)} ×{line.quantity}
                 {!cooked && line.cooking > 0
                   ? ` (${line.cooking}/${line.quantity})`
                   : ''}
@@ -505,17 +531,35 @@ export function KitchenToDo({
           );
         })}
         <Pressable
+          disabled={!complete}
           style={({ pressed }) => [
             styles.doneBtn,
             complete ? styles.doneBtnComplete : styles.doneBtnPartial,
-            pressed && styles.doneBtnHover,
+            !complete && styles.doneBtnDisabled,
+            complete && pressed && styles.doneBtnHover,
           ]}
-          onPress={() => toggleServeComplete(item.id)}
-          onLongPress={() => markDone(item.id)}
+          onPress={complete ? () => markDone(item.id) : undefined}
+          accessibilityState={{ disabled: !complete }}
+          accessibilityLabel={
+            complete
+              ? 'สำเร็จ — ปิดการ์ดนี้'
+              : 'ยังไม่ครบ — ติ๊กรายการด้านบนก่อน'
+          }
         >
-          <Text style={styles.doneText}>
-            {complete ? '✓ ครบแล้ว' : 'ยังไม่ครบ'}
-          </Text>
+          {complete ? (
+            <View style={styles.doneBtnInner}>
+              <MaterialCommunityIcons
+                name="check-circle"
+                size={22}
+                color="#FFFFFF"
+              />
+              <Text style={styles.doneText}>สำเร็จ</Text>
+            </View>
+          ) : (
+            <Text style={[styles.doneText, styles.doneTextDisabled]}>
+              ยังไม่ครบ
+            </Text>
+          )}
         </Pressable>
       </View>
     );
@@ -614,8 +658,8 @@ export function KitchenToDo({
       >
         {tab === 'cook' ? (
           <View style={styles.stationGrid}>
-            <View style={styles.stationGridItem}>{stationCard('snack')}</View>
-            <View style={styles.stationGridItem}>{stationCard('main')}</View>
+            <View style={styles.stationGridRow}>{stationCard('snack')}</View>
+            <View style={styles.stationGridRow}>{stationCard('main')}</View>
           </View>
         ) : waitingToServe.length === 0 ? (
           <Text style={styles.emptyReady}>ยังไม่มีรายการที่รอเสิร์ฟ</Text>
@@ -727,13 +771,12 @@ const styles = StyleSheet.create({
     flexGrow: 1,
   },
   stationGrid: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    gap: 12,
   },
-  stationGridItem: {
-    flex: 1,
-    minWidth: 0,
+  stationGridRow: {
+    width: '100%',
   },
   stationCard: {
     backgroundColor: '#141414',
@@ -754,6 +797,7 @@ const styles = StyleSheet.create({
   },
   dishHead: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     gap: 8,
   },
@@ -841,14 +885,12 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   readyGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    gap: 12,
   },
   readyCard: {
-    width: '48%',
-    flexGrow: 1,
-    minWidth: 180,
+    width: '100%',
     backgroundColor: '#141414',
     borderRadius: 12,
     borderWidth: 1.5,
@@ -863,11 +905,27 @@ const styles = StyleSheet.create({
     backgroundColor: '#1A160E',
     borderColor: '#FB8C00',
   },
+  readyTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginBottom: 4,
+  },
   readyTitle: {
+    flex: 1,
     color: '#FFFFFF',
     fontSize: 22,
     fontWeight: '800',
-    marginBottom: 4,
+  },
+  readyTitleComplete: {
+    color: '#81C784',
+  },
+  doneBtnInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
   },
   readyLineBtn: {
     borderRadius: 6,
@@ -906,10 +964,16 @@ const styles = StyleSheet.create({
   doneBtnPartial: {
     backgroundColor: '#FB8C00',
   },
+  doneBtnDisabled: {
+    opacity: 0.55,
+  },
   doneText: {
     color: '#FFFFFF',
     fontSize: 20,
     fontWeight: '900',
+  },
+  doneTextDisabled: {
+    color: 'rgba(255,255,255,0.85)',
   },
   emptyReady: {
     color: '#666',

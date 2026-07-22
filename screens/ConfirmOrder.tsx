@@ -1,12 +1,15 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Alert,
+  Dimensions,
   FlatList,
   Image,
   Keyboard,
+  type KeyboardEvent,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -21,6 +24,26 @@ import { EGG_ADDON, findMenuItem } from '../data/menu';
 import { colors } from '../utils/colors';
 import { formatBaht } from '../utils/format';
 import { persistPaymentEvidence } from '../utils/paymentEvidenceStorage';
+
+/** How much to lift the footer so it sits above the keyboard. */
+function keyboardCoverPx(event: KeyboardEvent) {
+  const screenH = Dimensions.get('screen').height;
+  const windowH = Dimensions.get('window').height;
+  const { height, screenY } = event.endCoordinates;
+
+  const fromHeight = typeof height === 'number' ? height : 0;
+  const fromScreen =
+    typeof screenY === 'number' ? Math.max(0, screenH - screenY) : 0;
+  // When the window already resized, screenY may sit near the window bottom.
+  const windowTopOnScreen = Math.max(0, screenH - windowH);
+  const fromWindow =
+    typeof screenY === 'number'
+      ? Math.max(0, windowH - (screenY - windowTopOnScreen))
+      : 0;
+
+  // Take the largest positive cover so the table row clears the keyboard.
+  return Math.max(0, Math.round(Math.max(fromHeight, fromScreen, fromWindow)));
+}
 
 const LANGUAGE = {
   en: {
@@ -92,7 +115,28 @@ export function ConfirmOrder({
   const [pendingEvidenceUri, setPendingEvidenceUri] = useState<string | null>(
     null,
   );
+  /** Android edge-to-edge often ignores adjustResize — lift footer by cover px. */
+  const [keyboardCover, setKeyboardCover] = useState(0);
   const hasTable = tableNumber.trim().length > 0;
+
+  useEffect(() => {
+    const showEvent =
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent =
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const onShow = Keyboard.addListener(showEvent, (event) => {
+      setKeyboardCover(keyboardCoverPx(event));
+    });
+    const onHide = Keyboard.addListener(hideEvent, () => {
+      setKeyboardCover(0);
+    });
+
+    return () => {
+      onShow.remove();
+      onHide.remove();
+    };
+  }, []);
 
   function itemName(item: { name: string; nameTh: string }) {
     return lang === 'th' ? item.nameTh : item.name;
@@ -185,148 +229,176 @@ export function ConfirmOrder({
     onConfirmed(method, evidenceUri);
   }
 
+  const keyboardOpen = keyboardCover > 0;
+  const footerBottom = keyboardOpen ? keyboardCover : 0;
+  const footerPadBottom = keyboardOpen ? 10 : insets.bottom + 16;
+
   return (
-    <Pressable
-      style={[styles.screen, { paddingTop: insets.top + 14 }]}
-      onPress={dismissKeyboard}
-    >
-      <SuccessPopup
-        visible={successDetail != null}
-        title={t.orderPlaced}
-        detail={successDetail ?? ''}
-        okLabel={t.ok}
-        onClose={finishSuccess}
-      />
-      <View style={styles.header}>
-        <Pressable onPress={onBack} hitSlop={8}>
-          <Text style={styles.back}>{t.back}</Text>
-        </Pressable>
-        <Text style={styles.title}>{t.title}</Text>
-        <View style={styles.headerSpacer} />
-      </View>
-
-      <View style={styles.tableBlock}>
-        <Text style={styles.tableLabel}>{t.table}</Text>
-        <TextInput
-          value={tableNumber}
-          onChangeText={setTableNumber}
-          placeholder={t.tablePlaceholder}
-          placeholderTextColor={colors.muted}
-          autoCapitalize="characters"
-          autoCorrect={false}
-          maxLength={7}
-          returnKeyType="done"
-          showSoftInputOnFocus
-          blurOnSubmit
-          onSubmitEditing={dismissKeyboard}
-          style={styles.tableInput}
+    <View style={styles.flex}>
+      <View style={[styles.screen, { paddingTop: insets.top + 14 }]}>
+        <SuccessPopup
+          visible={successDetail != null}
+          title={t.orderPlaced}
+          detail={successDetail ?? ''}
+          okLabel={t.ok}
+          onClose={finishSuccess}
         />
-        <Text style={styles.tableHint}>{t.tableHint}</Text>
-      </View>
-
-      <FlatList
-        data={lines}
-        keyExtractor={(item) => item.key}
-        contentContainerStyle={styles.list}
-        keyboardShouldPersistTaps="handled"
-        onScrollBeginDrag={dismissKeyboard}
-        ListEmptyComponent={<Text style={styles.empty}>{t.empty}</Text>}
-        renderItem={({ item }) => (
-          <View style={styles.row}>
-            {item.image ? (
-              <Image
-                source={item.image}
-                style={styles.rowImage}
-                resizeMode="cover"
-              />
-            ) : (
-              <View style={styles.rowImagePlaceholder} />
-            )}
-            <LinearGradient
-              colors={['rgba(0,0,0,0.92)', 'rgba(0,0,0,0.55)', 'transparent']}
-              locations={[0, 0.45, 0.85]}
-              start={{ x: 0, y: 0.5 }}
-              end={{ x: 1, y: 0.5 }}
-              style={styles.rowOverlay}
-              pointerEvents="none"
-            />
-            <View style={styles.rowContent}>
-              <View style={styles.rowInfo}>
-                <Text style={styles.name}>{item.name}</Text>
-                <Text style={styles.price}>
-                  {formatBaht(
-                    item.price * item.quantity +
-                      item.eggCount * EGG_ADDON.price,
-                  )}
-                </Text>
-                {item.eggCount > 0 ? (
-                  <Text style={styles.eggTag}>
-                    +{t.addEgg}×{item.eggCount}
-                  </Text>
-                ) : null}
-                {item.note ? (
-                  <Text style={styles.note} numberOfLines={2}>
-                    {item.note}
-                  </Text>
-                ) : null}
-                <Text style={styles.qty}>× {item.quantity}</Text>
-              </View>
-            </View>
-          </View>
-        )}
-      />
-
-      <View style={[styles.footer, { paddingBottom: insets.bottom + 16 }]}>
-        <View style={styles.subtotalRow}>
-          <View style={styles.subtotalLeft}>
-            <Text style={styles.subtotalLabel}>{t.subtotal}</Text>
-            <Text style={styles.subtotalCount}>
-              {itemCount} {t.items}
-            </Text>
-          </View>
-          <Text style={styles.subtotalValue}>{formatBaht(subtotal)}</Text>
+        <View style={styles.header}>
+          <Pressable onPress={onBack} hitSlop={8}>
+            <Text style={styles.back}>{t.back}</Text>
+          </Pressable>
+          <Text style={styles.title}>{t.title}</Text>
+          <View style={styles.headerSpacer} />
         </View>
 
-        {hasTable ? (
-          <View style={styles.actions}>
-            <Pressable
-              style={[
-                styles.actionButton,
-                lines.length === 0 && styles.actionDisabled,
-              ]}
-              disabled={lines.length === 0}
-              onPress={() => capturePaymentEvidence('qr')}
-            >
-              <MaterialCommunityIcons
-                name="camera"
-                size={22}
-                color="#000000"
+        <FlatList
+          data={lines}
+          keyExtractor={(item) => item.key}
+          style={styles.listFlex}
+          contentContainerStyle={[
+            styles.list,
+            // Leave room for absolute footer (+ actions when table filled).
+            {
+              paddingBottom: keyboardOpen
+                ? 88
+                : hasTable
+                  ? 160
+                  : 100,
+            },
+          ]}
+          keyboardShouldPersistTaps="handled"
+          onScrollBeginDrag={dismissKeyboard}
+          ListEmptyComponent={<Text style={styles.empty}>{t.empty}</Text>}
+          renderItem={({ item }) => (
+            <View style={styles.row}>
+              {item.image ? (
+                <Image
+                  source={item.image}
+                  style={styles.rowImage}
+                  resizeMode="cover"
+                />
+              ) : (
+                <View style={styles.rowImagePlaceholder} />
+              )}
+              <LinearGradient
+                colors={[
+                  'rgba(0,0,0,0.92)',
+                  'rgba(0,0,0,0.55)',
+                  'transparent',
+                ]}
+                locations={[0, 0.45, 0.85]}
+                start={{ x: 0, y: 0.5 }}
+                end={{ x: 1, y: 0.5 }}
+                style={styles.rowOverlay}
+                pointerEvents="none"
               />
-              <Text style={styles.actionText}>{t.qr}</Text>
-            </Pressable>
-            <Pressable
-              style={[
-                styles.actionButton,
-                lines.length === 0 && styles.actionDisabled,
-              ]}
-              disabled={lines.length === 0}
-              onPress={() => capturePaymentEvidence('cash')}
-            >
-              <MaterialCommunityIcons
-                name="cash"
-                size={22}
-                color="#000000"
-              />
-              <Text style={styles.actionText}>{t.cashAwait}</Text>
-            </Pressable>
+              <View style={styles.rowContent}>
+                <View style={styles.rowInfo}>
+                  <Text style={styles.name}>{item.name}</Text>
+                  <Text style={styles.price}>
+                    {formatBaht(
+                      item.price * item.quantity +
+                        item.eggCount * EGG_ADDON.price,
+                    )}
+                  </Text>
+                  {item.eggCount > 0 ? (
+                    <Text style={styles.eggTag}>
+                      +{t.addEgg}×{item.eggCount}
+                    </Text>
+                  ) : null}
+                  {item.note ? (
+                    <Text style={styles.note} numberOfLines={2}>
+                      {item.note}
+                    </Text>
+                  ) : null}
+                  <Text style={styles.qty}>× {item.quantity}</Text>
+                </View>
+              </View>
+            </View>
+          )}
+        />
+
+        <View
+          style={[
+            styles.footer,
+            {
+              bottom: footerBottom,
+              paddingBottom: footerPadBottom,
+            },
+          ]}
+        >
+          <View style={styles.subtotalRow}>
+            <View style={styles.subtotalLeft}>
+              <Text style={styles.subtotalLabel}>{t.subtotal}</Text>
+              <Text style={styles.subtotalCount}>
+                {itemCount} {t.items}
+              </Text>
+            </View>
+
+            <TextInput
+              value={tableNumber}
+              onChangeText={setTableNumber}
+              placeholder={t.tablePlaceholder}
+              placeholderTextColor={colors.muted}
+              autoCapitalize="characters"
+              autoCorrect={false}
+              maxLength={7}
+              returnKeyType="done"
+              showSoftInputOnFocus
+              blurOnSubmit
+              onSubmitEditing={dismissKeyboard}
+              style={styles.tableInput}
+              accessibilityLabel={t.table}
+            />
+
+            <Text style={styles.subtotalValue}>{formatBaht(subtotal)}</Text>
           </View>
-        ) : null}
+
+          {hasTable ? (
+            <View style={styles.actions}>
+              <Pressable
+                style={[
+                  styles.actionButton,
+                  lines.length === 0 && styles.actionDisabled,
+                ]}
+                disabled={lines.length === 0}
+                onPress={() => capturePaymentEvidence('qr')}
+              >
+                <MaterialCommunityIcons
+                  name="camera"
+                  size={22}
+                  color="#000000"
+                />
+                <Text style={styles.actionText}>{t.qr}</Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.actionButton,
+                  lines.length === 0 && styles.actionDisabled,
+                ]}
+                disabled={lines.length === 0}
+                onPress={() => capturePaymentEvidence('cash')}
+              >
+                <MaterialCommunityIcons
+                  name="cash"
+                  size={22}
+                  color="#000000"
+                />
+                <Text style={styles.actionText}>{t.cashAwait}</Text>
+              </Pressable>
+            </View>
+          ) : null}
+        </View>
       </View>
-    </Pressable>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  flex: {
+    flex: 1,
+    backgroundColor: colors.bg,
+  },
   screen: {
     flex: 1,
     backgroundColor: colors.bg,
@@ -352,36 +424,8 @@ const styles = StyleSheet.create({
   headerSpacer: {
     minWidth: 64,
   },
-  tableBlock: {
-    marginHorizontal: 16,
-    marginBottom: 8,
-    padding: 14,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255, 230, 0, 0.08)',
-    borderWidth: 1.5,
-    borderColor: colors.primary,
-    gap: 8,
-  },
-  tableLabel: {
-    color: colors.primary,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  tableInput: {
-    minHeight: 48,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    borderColor: 'rgba(255, 230, 0, 0.45)',
-    backgroundColor: '#1A1A1A',
-    paddingHorizontal: 14,
-    color: colors.primary,
-    fontSize: 22,
-    fontWeight: '800',
-  },
-  tableHint: {
-    color: '#C8C070',
-    fontSize: 13,
-    fontWeight: '600',
+  listFlex: {
+    flex: 1,
   },
   list: {
     padding: 16,
@@ -452,36 +496,59 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   footer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
     paddingHorizontal: 16,
     paddingTop: 12,
     borderTopWidth: 1,
     borderTopColor: colors.border,
     gap: 12,
+    backgroundColor: colors.bg,
+    zIndex: 20,
+    elevation: 20,
   },
   subtotalRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 10,
   },
   subtotalLeft: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: 8,
+    flexShrink: 0,
+    maxWidth: '28%',
   },
   subtotalLabel: {
     color: colors.text,
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
   },
   subtotalCount: {
     color: colors.muted,
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
+    marginTop: 2,
+  },
+  tableInput: {
+    flex: 1,
+    minHeight: 44,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+    backgroundColor: '#1A1A1A',
+    paddingHorizontal: 12,
+    color: colors.primary,
+    fontSize: 18,
+    fontWeight: '800',
+    textAlign: 'center',
   },
   subtotalValue: {
+    flexShrink: 0,
     color: colors.primary,
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: '800',
+    minWidth: 72,
+    textAlign: 'right',
   },
   actions: {
     flexDirection: 'row',
