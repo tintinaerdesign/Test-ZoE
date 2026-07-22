@@ -1,8 +1,4 @@
-# Supabase
-.branches
-.temp
-
-# dotenvx
-.env.keys
+# Local env — do not commit real keys
+.env
 .env.local
 .env.*.local

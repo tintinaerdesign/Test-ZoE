@@ -1,5 +1,7 @@
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useEffect, useState } from 'react';
 import {
+  Image,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
@@ -9,6 +11,7 @@ import {
   Text,
   TextInput,
   View,
+  type ImageSourcePropType,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -22,6 +25,14 @@ import {
   type StaffRole,
 } from '../utils/sessionStorage';
 
+const ROLE_IMAGES: Partial<Record<StaffRole | 'Founder admin', ImageSourcePropType>> = {
+  Waiter: require('../assets/role-waiter.png'),
+  Cashier: require('../assets/role-cashier.png'),
+  Kitchen: require('../assets/role-kitchen.png'),
+  Admin: require('../assets/role-admin.png'),
+  'Founder admin': require('../assets/role-founder-admin.png'),
+};
+
 type Props = {
   lang: 'en' | 'th';
   setLang: (value: 'en' | 'th') => void;
@@ -29,6 +40,7 @@ type Props = {
   initialNickname?: string;
   initialRole?: StaffRole | '';
   onContinue: (nickname: string, role: StaffRole) => void;
+  onBack?: () => void;
   onReady?: () => void;
 };
 
@@ -42,6 +54,7 @@ const COPY = {
     role: 'Role',
     needRole: 'Please select a role',
     continue: 'Continue',
+    back: 'Back',
     loggedInAs: 'id',
     founderBadge: 'Founder admin',
     founderHint: 'You are the Founder admin — no approval PIN needed.',
@@ -58,6 +71,7 @@ const COPY = {
     role: 'ตำแหน่ง',
     needRole: 'กรุณาเลือกตำแหน่ง',
     continue: 'ถัดไป',
+    back: 'กลับ',
     loggedInAs: 'id',
     founderBadge: 'Founder admin',
     founderHint: 'คุณคือ Founder admin — ไม่ต้องใช้รหัสยืนยัน',
@@ -78,6 +92,7 @@ export function SetNickname({
   initialNickname = '',
   initialRole = '',
   onContinue,
+  onBack,
   onReady,
 }: Props) {
   const insets = useSafeAreaInsets();
@@ -165,6 +180,26 @@ export function SetNickname({
       />
 
       <View style={styles.topBar}>
+        {onBack ? (
+          <Pressable
+            style={({ pressed }) => [
+              styles.backBtn,
+              pressed && styles.backBtnPressed,
+            ]}
+            onPress={onBack}
+            hitSlop={8}
+            accessibilityLabel={t.back}
+          >
+            <MaterialCommunityIcons
+              name="arrow-left"
+              size={20}
+              color="#111111"
+            />
+            <Text style={styles.backBtnText}>{t.back}</Text>
+          </Pressable>
+        ) : (
+          <View />
+        )}
         <View style={styles.langToggle}>
           <Pressable
             style={[styles.langBtn, lang === 'en' && styles.langBtnActive]}
@@ -230,46 +265,69 @@ export function SetNickname({
 
         <Text style={[styles.fieldLabel, styles.roleLabel]}>{t.role}</Text>
         {isFounder ? (
-          <View style={[styles.roleChip, styles.roleChipActive, styles.roleChipFull]}>
-            <Text style={[styles.roleChipText, styles.roleChipTextActive]}>
-              {FOUNDER_ADMIN.label}
-            </Text>
+          <View style={styles.founderRoleCard}>
+            <Image
+              source={ROLE_IMAGES['Founder admin']}
+              style={styles.founderRoleImage}
+              resizeMode="cover"
+            />
+            <View style={styles.founderRoleOverlay}>
+              <Text style={styles.founderRoleLabel}>{FOUNDER_ADMIN.label}</Text>
+            </View>
           </View>
         ) : (
           <View style={styles.roleGrid}>
             {STAFF_ROLES.map((option) => {
               const active = role === option;
               const locked = roleNeedsFounderPin(option);
+              const image = ROLE_IMAGES[option];
               return (
                 <Pressable
                   key={option}
                   style={({ pressed }) => [
-                    styles.roleChip,
-                    active && styles.roleChipActive,
-                    pressed && styles.roleChipPressed,
+                    styles.roleCard,
+                    active && styles.roleCardActive,
+                    pressed && styles.roleCardPressed,
                   ]}
                   onPress={() => {
                     setRole(option);
                     setNeedRole(false);
                   }}
                 >
-                  <Text
-                    style={[
-                      styles.roleChipText,
-                      active && styles.roleChipTextActive,
-                    ]}
-                  >
-                    {option}
-                  </Text>
-                  {locked ? (
+                  <View style={styles.roleCardArt}>
+                    {image ? (
+                      <Image
+                        source={image}
+                        style={styles.roleCardImage}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <View style={styles.roleCardImageFallback} />
+                    )}
+                  </View>
+                  <View style={styles.roleCardOverlay}>
                     <Text
                       style={[
-                        styles.roleLockHint,
-                        active && styles.roleLockHintActive,
+                        styles.roleCardTitle,
+                        active && styles.roleCardTitleActive,
                       ]}
                     >
-                      {t.needsApproval}
+                      {option}
                     </Text>
+                    {locked ? (
+                      <Text style={styles.roleCardHint}>{t.needsApproval}</Text>
+                    ) : null}
+                  </View>
+                  {active ? (
+                    <View style={styles.roleCardSelected} pointerEvents="none">
+                      <View style={styles.roleCardCheck}>
+                        <MaterialCommunityIcons
+                          name="check-bold"
+                          size={36}
+                          color="#111111"
+                        />
+                      </View>
+                    </View>
                   ) : null}
                 </Pressable>
               );
@@ -300,7 +358,28 @@ const styles = StyleSheet.create({
   },
   topBar: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  backBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    minHeight: 36,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: '#111111',
+    backgroundColor: 'rgba(255,255,255,0.55)',
+  },
+  backBtnPressed: {
+    opacity: 0.85,
+  },
+  backBtnText: {
+    color: '#111111',
+    fontSize: 14,
+    fontWeight: '800',
   },
   langToggle: {
     flexDirection: 'row',
@@ -401,46 +480,120 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 10,
   },
-  roleChip: {
-    minWidth: '47%',
+  roleCard: {
+    width: '47%',
     flexGrow: 1,
-    minHeight: 48,
-    borderRadius: 12,
-    borderWidth: 1.5,
+    aspectRatio: 1,
+    borderRadius: 14,
+    borderWidth: 2,
     borderColor: '#111111',
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 2,
-  },
-  roleChipFull: {
-    width: '100%',
-    minWidth: '100%',
-  },
-  roleChipActive: {
+    overflow: 'hidden',
     backgroundColor: '#111111',
   },
-  roleChipPressed: {
-    opacity: 0.88,
+  roleCardActive: {
+    borderColor: '#111111',
+    borderWidth: 4,
   },
-  roleChipText: {
-    color: '#111111',
-    fontSize: 15,
-    fontWeight: '800',
+  roleCardPressed: {
+    opacity: 0.92,
+    transform: [{ scale: 0.98 }],
   },
-  roleChipTextActive: {
+  roleCardArt: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  roleCardImage: {
+    width: '100%',
+    height: '100%',
+  },
+  roleCardImageFallback: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#222222',
+  },
+  roleCardSelected: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    zIndex: 3,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+  },
+  roleCardCheck: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    width: 64,
+    height: 64,
+    marginTop: -32,
+    marginLeft: -32,
+    borderRadius: 32,
+    backgroundColor: colors.primary,
+    borderWidth: 3,
+    borderColor: '#111111',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  roleCardOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 2,
+    paddingHorizontal: 10,
+    paddingTop: 12,
+    paddingBottom: 10,
+    backgroundColor: 'rgba(0,0,0,0.62)',
+  },
+  roleCardTitle: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '900',
+    letterSpacing: 0.2,
+    textShadowColor: 'rgba(0,0,0,0.85)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
+  roleCardTitleActive: {
     color: colors.primary,
   },
-  roleLockHint: {
-    color: '#666666',
-    fontSize: 11,
-    fontWeight: '600',
-    textAlign: 'center',
+  roleCardHint: {
+    marginTop: 2,
+    color: '#DDDDDD',
+    fontSize: 10,
+    fontWeight: '700',
+    lineHeight: 13,
   },
-  roleLockHintActive: {
-    color: '#BBBBBB',
+  founderRoleCard: {
+    width: '100%',
+    aspectRatio: 1,
+    maxHeight: 340,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: '#111111',
+    overflow: 'hidden',
+    backgroundColor: '#111111',
+  },
+  founderRoleImage: {
+    ...StyleSheet.absoluteFillObject,
+    width: '100%',
+    height: '100%',
+  },
+  founderRoleOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  founderRoleLabel: {
+    color: colors.primary,
+    fontSize: 20,
+    fontWeight: '900',
+    textShadowColor: 'rgba(0,0,0,0.8)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
   },
   error: {
     color: '#B71C1C',

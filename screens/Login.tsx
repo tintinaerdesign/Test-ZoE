@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../utils/colors';
+import { PIN_LENGTH } from '../utils/sessionStorage';
 
 type PinStep = 'enter' | 'confirm';
 
@@ -36,8 +37,8 @@ const COPY = {
     nickname: 'id',
     nicknamePlaceholder: 'Your id',
     needNickname: 'Please enter an id',
-    hintLogin: 'Enter your 4-digit PIN',
-    hintCreate: 'Create a 4-digit PIN',
+    hintLogin: 'Enter your 6-digit PIN',
+    hintCreate: 'Create a 6-digit PIN',
     hintConfirm: 'Confirm your PIN',
     wrong: 'Incorrect PIN',
     mismatch: 'PINs do not match — try again',
@@ -48,8 +49,8 @@ const COPY = {
     nickname: 'id',
     nicknamePlaceholder: 'id ของคุณ',
     needNickname: 'กรุณากรอก id',
-    hintLogin: 'กรอกรหัส PIN 4 หลัก',
-    hintCreate: 'ตั้งรหัส PIN 4 หลัก',
+    hintLogin: 'กรอกรหัส PIN 6 หลัก',
+    hintCreate: 'ตั้งรหัส PIN 6 หลัก',
     hintConfirm: 'ยืนยันรหัส PIN อีกครั้ง',
     wrong: 'รหัสไม่ถูกต้อง',
     mismatch: 'รหัสไม่ตรงกัน — ลองใหม่',
@@ -57,6 +58,7 @@ const COPY = {
 };
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', '⌫'] as const;
+const PIN_DOTS = Array.from({ length: PIN_LENGTH }, (_, i) => i);
 
 export function Login({
   lang,
@@ -94,7 +96,7 @@ export function Login({
   }, [onReady]);
 
   useEffect(() => {
-    if (pin.length !== 4) return;
+    if (pin.length !== PIN_LENGTH) return;
     const entered = pin;
     const timer = setTimeout(() => {
       const name = nicknameRef.current.trim();
@@ -145,7 +147,7 @@ export function Login({
       setPin((prev) => prev.slice(0, -1));
       return;
     }
-    setPin((prev) => (prev.length >= 4 ? prev : prev + key));
+    setPin((prev) => (prev.length >= PIN_LENGTH ? prev : prev + key));
   }
 
   const title = isRegister ? t.titleRegister : t.titleLogin;
@@ -222,7 +224,7 @@ export function Login({
       <Text style={styles.hint}>{hint}</Text>
 
       <View style={styles.dots}>
-        {[0, 1, 2, 3].map((i) => (
+        {PIN_DOTS.map((i) => (
           <View
             key={i}
             style={[styles.dot, pin.length > i && styles.dotFilled]}
@@ -356,13 +358,13 @@ const styles = StyleSheet.create({
   dots: {
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: 16,
+    gap: 10,
     marginBottom: 8,
   },
   dot: {
-    width: 14,
-    height: 14,
-    borderRadius: 7,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
     borderWidth: 2,
     borderColor: '#111111',
     backgroundColor: 'transparent',

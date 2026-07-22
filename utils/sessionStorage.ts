@@ -6,6 +6,9 @@ const NICKNAME_KEY = 'zoe.nickname';
 const ROLE_KEY = 'zoe.staffRole';
 const PIN_KEY = 'zoe.pin';
 
+/** App / banking-style PIN length (matches modern phone unlock defaults). */
+export const PIN_LENGTH = 6;
+
 export const STAFF_ROLES = ['Waiter', 'Cashier', 'Kitchen', 'Admin'] as const;
 export type StaffRole = (typeof STAFF_ROLES)[number];
 
@@ -18,7 +21,7 @@ export function isStaffRole(value: string): value is StaffRole {
  */
 export const FOUNDER_ADMIN = {
   staffId: 'tintin',
-  pin: '5972',
+  pin: '597200',
   label: 'Founder admin',
 } as const;
 
@@ -76,7 +79,7 @@ export async function loadPin(): Promise<string> {
 /** True after first-time registration (PIN was set). */
 export async function hasRegisteredAccount(): Promise<boolean> {
   const pin = await loadPin();
-  return pin.length === 4;
+  return pin.length === PIN_LENGTH;
 }
 
 export async function saveStaffId(staffId: string): Promise<void> {
@@ -128,7 +131,7 @@ export async function saveStaffAccount(
     if (trimmed) {
       await AsyncStorage.setItem(STAFF_ID_KEY, trimmed);
     }
-    if (pin.length === 4) {
+    if (pin.length === PIN_LENGTH) {
       await AsyncStorage.setItem(PIN_KEY, pin);
     }
   } catch {
@@ -140,7 +143,7 @@ export async function saveStaffAccount(
 export async function ensureStaffAccount(): Promise<void> {
   try {
     const existing = await AsyncStorage.getItem(PIN_KEY);
-    if (existing != null && existing.length === 4) {
+    if (existing != null && existing.length === PIN_LENGTH) {
       // Migrate legacy installs: nickname used to be the login id.
       const staffId = await AsyncStorage.getItem(STAFF_ID_KEY);
       if (!staffId) {
@@ -214,7 +217,7 @@ export async function saveSession(
       if (trimmed) {
         await AsyncStorage.setItem(STAFF_ID_KEY, trimmed);
       }
-      if (pin.length === 4) {
+      if (pin.length === PIN_LENGTH) {
         await AsyncStorage.setItem(PIN_KEY, pin);
       }
     } else {

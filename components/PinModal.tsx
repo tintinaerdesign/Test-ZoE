@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors } from '../utils/colors';
+import { PIN_LENGTH } from '../utils/sessionStorage';
 
 type Props = {
   visible: boolean;
@@ -16,19 +17,20 @@ type Props = {
 const COPY = {
   en: {
     title: 'Cashier PIN',
-    hint: 'Enter 4-digit PIN to confirm cash payment',
+    hint: 'Enter 6-digit PIN to confirm cash payment',
     wrong: 'Incorrect PIN',
     cancel: 'Cancel',
   },
   th: {
     title: 'รหัสแคชเชียร์',
-    hint: 'กรอกรหัส 4 หลัก เพื่อยืนยันชำระเงินสด',
+    hint: 'กรอกรหัส 6 หลัก เพื่อยืนยันชำระเงินสด',
     wrong: 'รหัสไม่ถูกต้อง',
     cancel: 'ยกเลิก',
   },
 };
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', '⌫'] as const;
+const PIN_DOTS = Array.from({ length: PIN_LENGTH }, (_, i) => i);
 
 export function PinModal({
   visible,
@@ -54,7 +56,7 @@ export function PinModal({
   }, [visible]);
 
   useEffect(() => {
-    if (!visible || pin.length !== 4) return;
+    if (!visible || pin.length !== PIN_LENGTH) return;
     const entered = pin;
     const timer = setTimeout(() => {
       if (entered === expectedRef.current) {
@@ -74,7 +76,7 @@ export function PinModal({
       setPin((prev) => prev.slice(0, -1));
       return;
     }
-    setPin((prev) => (prev.length >= 4 ? prev : prev + key));
+    setPin((prev) => (prev.length >= PIN_LENGTH ? prev : prev + key));
   }
 
   return (
@@ -93,7 +95,7 @@ export function PinModal({
           <Text style={styles.hint}>{hint ?? t.hint}</Text>
 
           <View style={styles.dots}>
-            {[0, 1, 2, 3].map((i) => (
+            {PIN_DOTS.map((i) => (
               <View
                 key={i}
                 style={[styles.dot, pin.length > i && styles.dotFilled]}
@@ -160,13 +162,13 @@ const styles = StyleSheet.create({
   },
   dots: {
     flexDirection: 'row',
-    gap: 14,
+    gap: 10,
     paddingVertical: 8,
   },
   dot: {
-    width: 14,
-    height: 14,
-    borderRadius: 7,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
     borderWidth: 2,
     borderColor: '#111111',
     backgroundColor: 'transparent',

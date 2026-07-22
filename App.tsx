@@ -38,7 +38,7 @@ import { lineFontSources } from './utils/fonts';
 import { loadUiCache, saveUiCache } from './utils/localCache';
 import { dismissNativeSplashCover } from './utils/nativeSplashCover';
 import { whenIdle } from './utils/schedule';
-import { saveNickname, saveSession, saveStaffRole } from './utils/sessionStorage';
+import { PIN_LENGTH, saveNickname, saveSession, saveStaffRole } from './utils/sessionStorage';
 import type { StaffRole } from './utils/sessionStorage';
 import {
   startupMark,
@@ -48,6 +48,7 @@ import {
 import {
   loadKitchenTickets,
   saveKitchenTickets,
+  subscribeKitchenTickets,
 } from './utils/ticketStorage';
 
 /** Lazy: not needed before splash hide — cuts ~js_module_eval cost. */
@@ -167,7 +168,7 @@ export default function App() {
       setNickname(savedName);
       setStaffRole(savedRole);
       setStaffPin(pin);
-      setHasAccount(pin.length === 4);
+      setHasAccount(pin.length === PIN_LENGTH);
       if (loggedIn) {
         setScreen(
           savedName.trim() && savedRole ? 'placeOrder' : 'setNickname',
@@ -188,6 +189,21 @@ export default function App() {
     if (!ticketsHydratedRef.current) return;
     void saveKitchenTickets(kitchenTickets);
   }, [kitchenTickets]);
+
+  // ── Multi-device: live order sync via Supabase Realtime ───────────────
+  useEffect(() => {
+    if (!authChecked) return;
+    const unsubscribe = subscribeKitchenTickets((tickets) => {
+      setKitchenTickets(tickets);
+      let nextSeq = orderSeqRef.current;
+      for (const ticket of tickets) {
+        const n = parseInt(ticket.orderNo, 10);
+        if (Number.isFinite(n) && n >= nextSeq) nextSeq = n + 1;
+      }
+      orderSeqRef.current = nextSeq;
+    });
+    return unsubscribe;
+  }, [authChecked]);
 
   useEffect(() => {
     if (!uiCacheHydratedRef.current) return;
@@ -313,6 +329,11 @@ export default function App() {
     setScreen('placeOrder');
   }
 
+  async function handleBackToLogin() {
+    await saveSession(false);
+    setScreen('login');
+  }
+
   async function handleLogout() {
     await saveSession(false);
     setCart({});
@@ -359,11 +380,11 @@ export default function App() {
     lang === 'th'
       ? {
           title: 'รหัสครัว',
-          hint: 'กรอกรหัส 4 หลัก เพื่อเข้า Kitchen Mode',
+          hint: 'กรอกรหัส 6 หลัก เพื่อเข้า Kitchen Mode',
         }
       : {
           title: 'Kitchen PIN',
-          hint: 'Enter 4-digit PIN to enter Kitchen Mode',
+          hint: 'Enter 6-digit PIN to enter Kitchen Mode',
         };
 
   return (
@@ -410,6 +431,7 @@ export default function App() {
                 initialNickname={nickname}
                 initialRole={staffRole}
                 onContinue={handleNicknameContinue}
+                onBack={handleBackToLogin}
                 onReady={onHomeReady}
               />
             ) : screen === 'placeOrder' ? (

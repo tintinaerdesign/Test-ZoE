@@ -11,3 +11,6 @@ npm-debug.*
 *.tsbuildinfo
 /ios
 /android
+.env
+.env.local
+.env.*.local
