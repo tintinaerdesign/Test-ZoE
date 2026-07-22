@@ -1,6 +1,6 @@
 # ZoE
 
-POS / kitchen app สำหรับร้านอาหาร — สั่งอาหาร · เก็บเงิน · ส่งครัว บน Android (Expo React Native)
+POS / kitchen app สำหรับร้าน **Zoe** — ใช้จริงในงานประจำวันที่ร้าน · สั่งอาหาร · เก็บเงิน · ส่งครัว บน Android (Expo React Native)
 
 <p align="center">
   <img src="docs/screenshots/app-icon.png" alt="ZoE app icon" width="120" />
